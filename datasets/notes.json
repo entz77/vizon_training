@@ -1,0 +1,25 @@
+{
+  "categories": [
+    {
+      "id": 0,
+      "name": "BOTTLE"
+    },
+    {
+      "id": 1,
+      "name": "JUG"
+    },
+    {
+      "id": 2,
+      "name": "REFILL POUCH"
+    },
+    {
+      "id": 3,
+      "name": "SACHET"
+    }
+  ],
+  "info": {
+    "year": 2026,
+    "version": "1.0",
+    "contributor": "Label Studio"
+  }
+}
