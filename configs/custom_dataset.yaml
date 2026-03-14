@@ -1,0 +1,10 @@
+names:
+- BOTTLE
+- JUG
+- REFILL POUCH
+- SACHET
+nc: 4
+path: datasets
+test: images/test
+train: images/train
+val: images/val

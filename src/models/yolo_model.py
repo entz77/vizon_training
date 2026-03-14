@@ -1,5 +1,5 @@
 """
-YOLO Model wrapper using Ultralytics YOLOv8
+YOLO Model wrapper using Ultralytics YOLO26
 """
 
 import torch
@@ -26,7 +26,7 @@ class YOLOModel:
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
         
         # Initialize model
-        self.model = YOLO(f'yolov8{model_size}.pt')
+        self.model = YOLO(f'yolo26{model_size}.pt')
         self.model.to(self.device)
     
     def train(

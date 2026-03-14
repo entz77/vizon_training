@@ -84,7 +84,7 @@ class YOLOTrainer:
         momentum=0.937,
         weight_decay=0.0005,
         warmup_epochs=3,
-        save_dir='runs/detect/train'
+        save_dir='./runs/detect/train'
     ):
         """
         Train YOLO model.

@@ -4,7 +4,7 @@
 model_size: 'm'  # Model size: n, s, m, l, x
 
 # Training parameters
-epochs: 100
+epochs: 200
 batch_size: 32
 imgsz: 640
 patience: 20
@@ -30,7 +30,7 @@ fliplr: 0.5    # Flip left-right probability
 mosaic: 1.0    # Mosaic augmentation
 
 # Device and logging
-device: null   # cuda, cpu, or null for auto
+device: mps   # cuda, cpu, or null for auto
 verbose: true
 save_period: 10
 
