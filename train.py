@@ -86,25 +86,25 @@ if __name__ == '__main__':
     parser.add_argument(
         '--epochs',
         type=int,
-        default=100,
+        default=None,
         help='Number of training epochs'
     )
     parser.add_argument(
         '--batch-size',
         type=int,
-        default=32,
+        default=None,
         help='Batch size for training'
     )
     parser.add_argument(
         '--imgsz',
         type=int,
-        default=640,
+        default=None,
         help='Input image size'
     )
     parser.add_argument(
         '--patience',
         type=int,
-        default=20,
+        default=None,
         help='Early stopping patience'
     )
     
@@ -112,13 +112,13 @@ if __name__ == '__main__':
     parser.add_argument(
         '--lr0',
         type=float,
-        default=0.01,
+        default=None,
         help='Initial learning rate'
     )
     parser.add_argument(
         '--lrf',
         type=float,
-        default=0.01,
+        default=None,
         help='Final learning rate ratio'
     )
     
@@ -126,19 +126,19 @@ if __name__ == '__main__':
     parser.add_argument(
         '--momentum',
         type=float,
-        default=0.937,
+        default=None,
         help='SGD momentum'
     )
     parser.add_argument(
         '--weight-decay',
         type=float,
-        default=0.0005,
+        default=None,
         help='Weight decay'
     )
     parser.add_argument(
         '--warmup-epochs',
         type=int,
-        default=3,
+        default=None,
         help='Warmup epochs'
     )
     
@@ -146,7 +146,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--save-dir',
         type=str,
-        default='runs/detect/train',
+        default=None,
         help='Directory to save training results'
     )
     parser.add_argument(

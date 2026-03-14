@@ -75,16 +75,16 @@ class YOLOTrainer:
     def train(
         self,
         data_yaml,
-        epochs=100,
-        batch_size=16,
-        imgsz=640,
-        patience=20,
-        lr0=0.01,
-        lrf=0.01,
-        momentum=0.937,
-        weight_decay=0.0005,
-        warmup_epochs=3,
-        save_dir='./runs/detect/train'
+        epochs=None,
+        batch_size=None,
+        imgsz=None,
+        patience=None,
+        lr0=None,
+        lrf=None,
+        momentum=None,
+        weight_decay=None,
+        warmup_epochs=None,
+        save_dir=None
     ):
         """
         Train YOLO model.
@@ -105,6 +105,18 @@ class YOLOTrainer:
         Returns:
             dict: Training results
         """
+        # Use config values as defaults, allow overrides
+        epochs = epochs if epochs is not None else self.config.get('epochs', 100)
+        batch_size = batch_size if batch_size is not None else self.config.get('batch_size', 16)
+        imgsz = imgsz if imgsz is not None else self.config.get('imgsz', 640)
+        patience = patience if patience is not None else self.config.get('patience', 20)
+        lr0 = lr0 if lr0 is not None else self.config.get('lr0', 0.01)
+        lrf = lrf if lrf is not None else self.config.get('lrf', 0.01)
+        momentum = momentum if momentum is not None else self.config.get('momentum', 0.937)
+        weight_decay = weight_decay if weight_decay is not None else self.config.get('weight_decay', 0.0005)
+        warmup_epochs = warmup_epochs if warmup_epochs is not None else self.config.get('warmup_epochs', 3)
+        save_dir = save_dir if save_dir is not None else self.config.get('output_dir', './runs/detect/train')
+        
         self.logger.info("=" * 50)
         self.logger.info("Starting YOLO Training")
         self.logger.info("=" * 50)

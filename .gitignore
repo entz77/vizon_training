@@ -6,3 +6,6 @@ logs/
 *.cache
 models/
 *.pt
+*cuda-keyring*
+runs/
+venv/

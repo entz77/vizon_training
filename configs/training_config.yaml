@@ -4,9 +4,9 @@
 model_size: 'm'  # Model size: n, s, m, l, x
 
 # Training parameters
-epochs: 200
-batch_size: 32
-imgsz: 640
+epochs: 100
+batch_size: 64
+imgsz: 512
 patience: 20
 
 # Learning rate parameters
@@ -30,11 +30,11 @@ fliplr: 0.5    # Flip left-right probability
 mosaic: 1.0    # Mosaic augmentation
 
 # Device and logging
-device: mps   # cuda, cpu, or null for auto
+device: cuda   # cuda, cpu, or null for auto
 verbose: true
 save_period: 10
 
 # Directories
-data_dir: datasets
-log_dir: logs
-output_dir: runs
+data_dir: /home/enitze/projects/repos/vizon/vizon_training/datasets
+log_dir: /home/enitze/projects/repos/vizon/vizon_training/logs/log
+output_dir: /home/enitze/projects/repos/vizon/vizon_training/runs/run
