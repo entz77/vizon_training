@@ -146,7 +146,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--save-dir',
         type=str,
-        default='runs/run',
+        default='runs/train',
         help='Directory to save training results'
     )
     parser.add_argument(

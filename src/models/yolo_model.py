@@ -36,7 +36,7 @@ class YOLOModel:
         batch_size=16,
         imgsz=640,
         patience=20,
-        save_dir='run',
+        save_dir='train',
         resume=False,
         device=None,
         **kwargs
@@ -67,8 +67,7 @@ class YOLOModel:
             batch=batch_size,
             patience=patience,
             device=device,
-            project=str(Path(save_dir).parent),
-            name=Path(save_dir).name,
+            save_dir=save_dir,
             resume=resume,
             **kwargs
         )
