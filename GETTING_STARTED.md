@@ -145,7 +145,7 @@ python train.py \
 ### Resume Training
 ```bash
 python train.py \
-    --config runs/detect/train/args.yaml \
+    --config runs/run/args.yaml \
     --resume
 ```
 
@@ -154,7 +154,7 @@ python train.py \
 ### Single Image
 ```bash
 python infer.py \
-    --weights runs/detect/train/weights/best.pt \
+    --weights runs/detect/weights/best.pt \
     --source images/test.jpg \
     --mode image \
     --conf 0.5
@@ -163,7 +163,7 @@ python infer.py \
 ### Batch Inference
 ```bash
 python infer.py \
-    --weights runs/detect/train/weights/best.pt \
+    --weights runs/detect/weights/best.pt \
     --source images/test_folder/ \
     --mode image
 ```
@@ -171,7 +171,7 @@ python infer.py \
 ### Video Inference
 ```bash
 python infer.py \
-    --weights runs/detect/train/weights/best.pt \
+    --weights runs/detect/weights/best.pt \
     --source video.mp4 \
     --mode video \
     --output output.mp4 \
@@ -181,7 +181,7 @@ python infer.py \
 ### Real-time Webcam
 ```bash
 python infer.py \
-    --weights runs/detect/train/weights/best.pt \
+    --weights runs/detect/weights/best.pt \
     --mode webcam \
     --duration 60 \
     --output webcam_output.mp4
@@ -191,7 +191,7 @@ python infer.py \
 
 ```bash
 python evaluate.py \
-    --weights runs/detect/train/weights/best.pt \
+    --weights runs/detect/weights/best.pt \
     --test-dir datasets/my_dataset/images/test \
     --output results.json \
     --conf 0.5

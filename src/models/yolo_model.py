@@ -36,7 +36,7 @@ class YOLOModel:
         batch_size=16,
         imgsz=640,
         patience=20,
-        save_dir='runs/detect/train',
+        save_dir='run',
         resume=False,
         device=None,
         **kwargs

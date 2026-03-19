@@ -35,6 +35,6 @@ verbose: true
 save_period: 10
 
 # Directories
-data_dir: ./datasets
-log_dir: ./log
-output_dir: ./run
+data_dir: datasets
+log_dir: log
+output_dir: run
