@@ -19,10 +19,16 @@ def main(args):
     print("=" * 50)
     print("YOLO Model Evaluation")
     print("=" * 50)
+    print(f"Task: {args.task}")
     
     # Load model
     print(f"Loading model: {args.weights}")
-    model = YOLOModel(device=args.device)
+    model = YOLOModel(
+        model_size=args.model_size,
+        device=args.device,
+        task=args.task,
+        model_name=args.model_name
+    )
     model.load_weights(args.weights)
     
     # Initialize evaluator
@@ -58,6 +64,26 @@ if __name__ == '__main__':
         type=str,
         required=True,
         help='Path to model weights'
+    )
+    parser.add_argument(
+        '--task',
+        type=str,
+        default='detect',
+        choices=['detect', 'obb'],
+        help='YOLO task type'
+    )
+    parser.add_argument(
+        '--model-size',
+        type=str,
+        default='m',
+        choices=['n', 's', 'm', 'l', 'x'],
+        help='Model size for base model initialization'
+    )
+    parser.add_argument(
+        '--model-name',
+        type=str,
+        default=None,
+        help='Optional explicit model checkpoint name/path for base initialization'
     )
     parser.add_argument(
         '--test-dir',

@@ -29,7 +29,17 @@ def main(args):
     print("=" * 50)
     
     # Initialize trainer
-    trainer = YOLOTrainer(config_path=args.config, log_dir=args.log_dir)
+    trainer = YOLOTrainer(
+        config_path=args.config,
+        log_dir=args.log_dir,
+        task=args.task,
+        model_name=args.model_name
+    )
+    selected_task = args.task or trainer.model.task
+
+    print(f"Task: {selected_task}")
+    if args.model_name:
+        print(f"Model Override: {args.model_name}")
     
     # Train
     results = trainer.train(
@@ -43,7 +53,8 @@ def main(args):
         momentum=args.momentum,
         weight_decay=args.weight_decay,
         warmup_epochs=args.warmup_epochs,
-        save_dir=args.save_dir
+        save_dir=args.save_dir,
+        task=selected_task
     )
     
     # Validation
@@ -54,7 +65,8 @@ def main(args):
         val_results = trainer.validate(
             data_yaml=args.data,
             imgsz=args.imgsz,
-            batch_size=args.batch_size
+            batch_size=args.batch_size,
+            task=selected_task
         )
         print("Validation completed!")
     
@@ -80,6 +92,19 @@ if __name__ == '__main__':
         type=str,
         default='configs/training_config.yaml',
         help='Path to training configuration YAML file'
+    )
+    parser.add_argument(
+        '--task',
+        type=str,
+        default=None,
+        choices=['detect', 'obb'],
+        help='YOLO task type (defaults to config value when omitted)'
+    )
+    parser.add_argument(
+        '--model-name',
+        type=str,
+        default=None,
+        help='Optional explicit model checkpoint name/path (e.g. yolo26m-obb.pt)'
     )
     
     # Training arguments

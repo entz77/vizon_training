@@ -19,13 +19,15 @@ class YOLOTrainer:
     Handles training, logging, checkpointing, and validation.
     """
     
-    def __init__(self, config_path=None, log_dir='logs'):
+    def __init__(self, config_path=None, log_dir='logs', task=None, model_name=None):
         """
         Initialize trainer.
         
         Args:
             config_path (str): Path to training configuration YAML file
             log_dir (str): Directory for training logs
+            task (str): Optional task override ('detect' or 'obb')
+            model_name (str): Optional explicit checkpoint name/path
         """
         self.config = self._load_config(config_path) if config_path else {}
         self.log_dir = Path(log_dir)
@@ -36,9 +38,13 @@ class YOLOTrainer:
         
         # Initialize model
         model_size = self.config.get('model_size', 'm')
-        self.model = YOLOModel(model_size=model_size)
+        model_task = task if task is not None else self.config.get('task', 'detect')
+        model_checkpoint = model_name if model_name is not None else self.config.get('model_name')
+        self.model = YOLOModel(model_size=model_size, task=model_task, model_name=model_checkpoint)
         
-        self.logger.info(f"Trainer initialized with model size: {model_size}")
+        self.logger.info(
+            f"Trainer initialized with model size: {model_size}, task: {model_task}, model: {self.model.model_name}"
+        )
     
     def _load_config(self, config_path):
         """Load configuration from YAML file"""
@@ -84,7 +90,8 @@ class YOLOTrainer:
         momentum=None,
         weight_decay=None,
         warmup_epochs=None,
-        save_dir=None
+        save_dir=None,
+        task=None
     ):
         """
         Train YOLO model.
@@ -101,6 +108,7 @@ class YOLOTrainer:
             weight_decay (float): Weight decay
             warmup_epochs (int): Warmup epochs
             save_dir (str): Directory to save training results
+            task (str): YOLO task ('detect' or 'obb')
         
         Returns:
             dict: Training results
@@ -116,6 +124,7 @@ class YOLOTrainer:
         weight_decay = weight_decay if weight_decay is not None else self.config.get('weight_decay', 0.0005)
         warmup_epochs = warmup_epochs if warmup_epochs is not None else self.config.get('warmup_epochs', 3)
         save_dir = save_dir if save_dir is not None else self.config.get('output_dir', './runs/detect/train')
+        task = task if task is not None else self.config.get('task', self.model.task)
         
         self.logger.info("=" * 50)
         self.logger.info("Starting YOLO Training")
@@ -124,6 +133,7 @@ class YOLOTrainer:
         self.logger.info(f"Epochs: {epochs}")
         self.logger.info(f"Batch Size: {batch_size}")
         self.logger.info(f"Image Size: {imgsz}")
+        self.logger.info(f"Task: {task}")
         
         # Train
         results = self.model.train(
@@ -139,14 +149,15 @@ class YOLOTrainer:
             momentum=momentum,
             weight_decay=weight_decay,
             warmup_epochs=warmup_epochs,
-            verbose=True
+            verbose=True,
+            task=task
         )
         
         self.logger.info("Training completed successfully!")
         
         return results
     
-    def validate(self, data_yaml, weights_path=None, imgsz=640, batch_size=16):
+    def validate(self, data_yaml, weights_path=None, imgsz=640, batch_size=16, task=None):
         """
         Validate model.
         
@@ -155,6 +166,7 @@ class YOLOTrainer:
             weights_path (str): Path to model weights. Uses current if None.
             imgsz (int): Input image size
             batch_size (int): Batch size
+            task (str): YOLO task ('detect' or 'obb')
         
         Returns:
             dict: Validation results
@@ -166,7 +178,8 @@ class YOLOTrainer:
         results = self.model.val(
             data_yaml=data_yaml,
             imgsz=imgsz,
-            batch_size=batch_size
+            batch_size=batch_size,
+            task=task
         )
         
         return results

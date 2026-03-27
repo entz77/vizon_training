@@ -1,0 +1,27 @@
+# Inference configuration
+
+# Core settings
+weights: runs/run7/weights/best.pt
+task: obb
+mode: image
+source: datasets/softener_pewangi/images/val/1000134219.jpg
+
+# Model init overrides (optional)
+model_size: l
+model_name: null
+
+# Thresholds
+device: cuda
+conf: 0.85
+iou: 0.2
+
+# Output settings
+output_dir: runs/infer
+output: null       # null -> auto-name under output_dir using source filename
+save_txt: true
+txt_output: null   # null -> auto-name under output_dir using source filename
+save_conf: false
+
+# Video/Webcam settings
+fps: 30
+duration: 30

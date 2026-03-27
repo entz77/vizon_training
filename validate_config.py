@@ -15,6 +15,10 @@ def validate_config(config_path):
     for key in required_keys:
         if key not in config:
             raise ValueError(f"Missing required key: {key}")
+
+    task = config.get('task', 'detect')
+    if task not in {'detect', 'obb'}:
+        raise ValueError("Invalid task in training config. Expected 'detect' or 'obb'.")
     
     return config
 

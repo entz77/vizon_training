@@ -41,9 +41,12 @@ class YOLOEvaluator:
             source=test_dir,
             conf=conf_threshold
         )
+
+        task = self.model.task
         
         # Process results
         metrics = {
+            'task': task,
             'total_images': len(predictions),
             'predictions': []
         }
@@ -53,10 +56,21 @@ class YOLOEvaluator:
                 'image': result.path,
                 'detections': []
             }
-            
-            if result.boxes is not None:
+
+            if task == 'obb' and getattr(result, 'obb', None) is not None:
+                for obb in result.obb:
+                    pred_data['detections'].append({
+                        'task': 'obb',
+                        'class': int(obb.cls[0]),
+                        'confidence': float(obb.conf[0]),
+                        'polygon': obb.xyxyxyxy[0].tolist() if getattr(obb, 'xyxyxyxy', None) is not None else [],
+                        'xywhr': obb.xywhr[0].tolist() if getattr(obb, 'xywhr', None) is not None else []
+                    })
+
+            if task == 'detect' and result.boxes is not None:
                 for box in result.boxes:
                     pred_data['detections'].append({
+                        'task': 'detect',
                         'class': int(box.cls[0]),
                         'confidence': float(box.conf[0]),
                         'bbox': box.xyxy[0].tolist()

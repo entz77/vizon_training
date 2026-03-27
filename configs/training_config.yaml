@@ -1,12 +1,14 @@
 # YOLO Training Configuration
 
 # Model settings
-model_size: 'm'  # Model size: n, s, m, l, x
+model_size: 'l'  # Model size: n, s, m, l, x
+task: 'obb'   # Task type: detect or obb
+model_name: null # Optional explicit model checkpoint (e.g. yolo26m-obb.pt)
 
 # Training parameters
 epochs: 100
-batch_size: 64
-imgsz: 512
+batch_size: 24
+imgsz: 480
 patience: 20
 
 # Learning rate parameters

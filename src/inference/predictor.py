@@ -45,6 +45,73 @@ class YOLOPredictor:
         )
         
         return self._format_results(results[0])
+
+    def save_annotated_image(self, image_path: str, predictions: dict, output_path: str):
+        """Save an annotated image with predictions drawn on it."""
+        image = cv2.imread(image_path)
+        if image is None:
+            raise ValueError(f"Cannot read image: {image_path}")
+
+        annotated = self._draw_boxes(image, predictions)
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(out_path), annotated):
+            raise ValueError(f"Failed to write annotated image: {output_path}")
+
+    def save_yolo_txt(self, predictions: dict, output_path: str, save_conf: bool = False):
+        """Save predictions into YOLO txt format.
+
+        Detect format:
+            class x_center y_center width height [conf]
+        OBB format:
+            class x1 y1 x2 y2 x3 y3 x4 y4 [conf]
+        """
+        lines = []
+        task = predictions.get('task', 'detect')
+
+        for detection in predictions.get('detections', []):
+            cls_id = detection.get('class_id', -1)
+            if cls_id < 0:
+                continue
+
+            if task == 'obb':
+                polygon = detection.get('polygon_normalized', [])
+                if len(polygon) < 4:
+                    continue
+
+                coords = []
+                for point in polygon[:4]:
+                    if len(point) != 2:
+                        continue
+                    coords.append(f"{float(point[0]):.6f}")
+                    coords.append(f"{float(point[1]):.6f}")
+
+                if len(coords) != 8:
+                    continue
+
+                row = [str(cls_id), *coords]
+            else:
+                bbox = detection.get('bbox_normalized', {})
+                required_keys = ['x_center', 'y_center', 'width', 'height']
+                if not all(key in bbox for key in required_keys):
+                    continue
+
+                row = [
+                    str(cls_id),
+                    f"{float(bbox['x_center']):.6f}",
+                    f"{float(bbox['y_center']):.6f}",
+                    f"{float(bbox['width']):.6f}",
+                    f"{float(bbox['height']):.6f}",
+                ]
+
+            if save_conf:
+                row.append(f"{float(detection.get('confidence', 0.0)):.6f}")
+
+            lines.append(' '.join(row))
+
+        out_path = Path(output_path)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text('\n'.join(lines) + ('\n' if lines else ''), encoding='utf-8')
     
     def predict_batch(self, image_paths: List[str]):
         """
@@ -189,15 +256,53 @@ class YOLOPredictor:
         return predictions
     
     @staticmethod
+    def _resolve_class_name(names, cls_idx):
+        """Resolve class name from Ultralytics names dict/list."""
+        if cls_idx < 0:
+            return 'Unknown'
+        if isinstance(names, dict):
+            return names.get(cls_idx, 'Unknown')
+        if isinstance(names, list) and cls_idx < len(names):
+            return names[cls_idx]
+        return 'Unknown'
+
+    @staticmethod
     def _format_results(result):
         """Format YOLO results into standardized dict"""
         detections = []
-        
-        if result.boxes is not None:
-            for box in result.boxes:
+        task = 'obb' if getattr(result, 'obb', None) is not None else 'detect'
+
+        if task == 'obb' and result.obb is not None:
+            for obb in result.obb:
+                cls_idx = int(obb.cls[0]) if obb.cls is not None else -1
+                polygon = obb.xyxyxyxy[0].tolist() if getattr(obb, 'xyxyxyxy', None) is not None else []
+
                 detection = {
-                    'class_id': int(box.cls[0]) if box.cls is not None else -1,
-                    'class_name': result.names[int(box.cls[0])] if box.cls is not None else 'Unknown',
+                    'task': 'obb',
+                    'class_id': cls_idx,
+                    'class_name': YOLOPredictor._resolve_class_name(result.names, cls_idx),
+                    'confidence': float(obb.conf[0]) if obb.conf is not None else 0,
+                    'polygon': polygon,
+                    'polygon_normalized': (
+                        obb.xyxyxyxyn[0].tolist()
+                        if getattr(obb, 'xyxyxyxyn', None) is not None
+                        else []
+                    ),
+                    'xywhr': (
+                        obb.xywhr[0].tolist()
+                        if getattr(obb, 'xywhr', None) is not None
+                        else []
+                    )
+                }
+                detections.append(detection)
+        
+        if task == 'detect' and result.boxes is not None:
+            for box in result.boxes:
+                cls_idx = int(box.cls[0]) if box.cls is not None else -1
+                detection = {
+                    'task': 'detect',
+                    'class_id': cls_idx,
+                    'class_name': YOLOPredictor._resolve_class_name(result.names, cls_idx),
                     'confidence': float(box.conf[0]) if box.conf is not None else 0,
                     'bbox': {
                         'x1': float(box.xyxy[0][0]),
@@ -215,6 +320,7 @@ class YOLOPredictor:
                 detections.append(detection)
         
         return {
+            'task': task,
             'image_path': result.path if hasattr(result, 'path') else None,
             'detections': detections,
             'image_shape': result.orig_shape if hasattr(result, 'orig_shape') else None
@@ -247,21 +353,28 @@ class YOLOPredictor:
         }
         
         for detection in predictions['detections']:
-            bbox = detection['bbox']
-            x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
-            
             class_id = detection['class_id']
             color = colors.get(class_id % 6, (255, 255, 255))
-            
-            # Draw rectangle
-            cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, thickness)
-            
+
+            if detection.get('task') == 'obb' and detection.get('polygon'):
+                points = np.array(detection['polygon'], dtype=np.int32)
+                if points.ndim == 2 and points.shape[0] >= 4:
+                    cv2.polylines(frame_copy, [points], isClosed=True, color=color, thickness=thickness)
+                    label_anchor = tuple(points[0])
+                else:
+                    label_anchor = (10, 20)
+            else:
+                bbox = detection['bbox']
+                x1, y1, x2, y2 = int(bbox['x1']), int(bbox['y1']), int(bbox['x2']), int(bbox['y2'])
+                cv2.rectangle(frame_copy, (x1, y1), (x2, y2), color, thickness)
+                label_anchor = (x1, y1)
+
             # Draw label
             label = f"{detection['class_name']} {detection['confidence']:.2f}"
             cv2.putText(
                 frame_copy,
                 label,
-                (x1, y1 - 10),
+                (int(label_anchor[0]), int(label_anchor[1]) - 10),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 font_scale,
                 color,

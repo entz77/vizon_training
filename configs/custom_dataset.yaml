@@ -1,10 +1,7 @@
 names:
-- BOTTLE
-- JUG
-- REFILL POUCH
-- SACHET
-nc: 4
-path: datasets
+- SOFTENER_PEWANGI
+nc: 1
+path: datasets/softener_pewangi
 test: images/test
 train: images/train
 val: images/val

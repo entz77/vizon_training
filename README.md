@@ -39,6 +39,7 @@ vizon_backend/
 ├── infer.py              # Inference script
 ├── evaluate.py           # Evaluation script
 ├── examples.py           # Usage examples
+├── convert_obb_labels.py # Label format converter CLI (xywhr -> OBB corners)
 └── requirements.txt      # Python dependencies
 ```
 
@@ -101,10 +102,20 @@ names: ['class1', 'class2', 'class3', 'class4', 'class5']
 ```bash
 python train.py \
     --data configs/dataset_config.yaml \
+    --task detect \
     --epochs 100 \
     --batch-size 32 \
     --imgsz 640 \
     --validate
+```
+
+**Train an OBB model:**
+```bash
+python train.py \
+    --data configs/dataset_config.yaml \
+    --task obb \
+    --model-name yolo26m-obb.pt \
+    --epochs 100
 ```
 
 ### 4. Run Inference
@@ -113,9 +124,37 @@ python train.py \
 ```bash
 python infer.py \
     --weights runs/detect/train/weights/best.pt \
+    --task detect \
     --source path/to/image.jpg \
     --mode image
 ```
+
+**OBB inference:**
+```bash
+python infer.py \
+    --weights runs/run/weights/best.pt \
+    --task obb \
+    --source path/to/image.jpg \
+    --mode image
+```
+
+**Save annotated image + YOLO txt predictions (image mode):**
+```bash
+python infer.py \
+    --weights runs/run7/weights/best.pt \
+    --task obb \
+    --source path/to/image.jpg \
+    --mode image \
+    --output runs/infer/image_annotated.jpg \
+    --save-txt \
+    --txt-output runs/infer/image.txt
+```
+
+Notes:
+- `--output` saves annotated image in `image` mode.
+- `--save-txt` saves prediction labels in YOLO format.
+- `--txt-output` is optional (default uses source/output stem + `.txt`).
+- `--save-conf` appends confidence score to each txt row.
 
 **On a video:**
 ```bash
@@ -140,8 +179,34 @@ python infer.py \
 ```bash
 python evaluate.py \
     --weights runs/detect/train/weights/best.pt \
+    --task detect \
     --test-dir datasets/my_dataset/images/test \
     --output eval_results.json
+```
+
+### 6. Convert Labels to YOLO OBB Corner Format
+
+Convert labels from:
+```text
+class_id x y w h r
+```
+to:
+```text
+class_id x1 y1 x2 y2 x3 y3 x4 y4
+```
+
+CLI usage:
+```bash
+python convert_obb_labels.py \
+    --input-dir datasets/homecare/labels/train
+```
+
+If your angle `r` is in degrees:
+```bash
+python convert_obb_labels.py \
+    --input-dir datasets/homecare/labels/train \
+    --output-dir datasets/homecare/labels/train_obb \
+    --angle-unit degrees
 ```
 
 ## Usage Examples
@@ -159,7 +224,7 @@ setup_seed(42)
 device = get_device()
 
 # Initialize trainer
-trainer = YOLOTrainer()
+trainer = YOLOTrainer(task='detect')
 
 # Train
 results = trainer.train(
@@ -169,7 +234,7 @@ results = trainer.train(
 )
 
 # Inference
-model = YOLOModel(model_size='m')
+model = YOLOModel(model_size='m', task='detect')
 predictor = YOLOPredictor(model)
 results = predictor.predict_image('path/to/image.jpg')
 
@@ -184,6 +249,8 @@ for detection in results['detections']:
 
 Key parameters:
 - `model_size`: Model size (n/s/m/l/x)
+- `task`: YOLO task (`detect` or `obb`)
+- `model_name`: Optional explicit checkpoint filename/path
 - `epochs`: Number of training epochs
 - `batch_size`: Batch size
 - `imgsz`: Input image size
@@ -203,7 +270,7 @@ Key parameters:
 
 ### YOLOModel
 ```python
-model = YOLOModel(model_size='m', device='cuda')
+model = YOLOModel(model_size='m', device='cuda', task='detect')
 model.train(data_yaml, epochs=100, batch_size=32)
 results = model.predict(source='image.jpg', conf=0.5)
 model.export(format='onnx')
@@ -221,8 +288,18 @@ trainer.log_metrics({'loss': 0.5})
 ```python
 predictor = YOLOPredictor(model, conf_threshold=0.5)
 results = predictor.predict_image('image.jpg')
+predictor.save_annotated_image('image.jpg', results, 'annotated.jpg')
+predictor.save_yolo_txt(results, 'predictions.txt', save_conf=False)
 results = predictor.predict_video('video.mp4', output_path='output.mp4')
 results = predictor.predict_webcam(duration=30)
+```
+
+### Label Converter Utilities
+```python
+from src.data import convert_line_xywhr_to_obb, convert_folder_xywhr_to_obb
+
+line = convert_line_xywhr_to_obb('0 0.5 0.5 0.2 0.1 0.785398', angle_unit='radians')
+converted = convert_folder_xywhr_to_obb('labels_in', output_dir='labels_out')
 ```
 
 ### YOLOEvaluator

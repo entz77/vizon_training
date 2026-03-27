@@ -101,6 +101,8 @@ Open `configs/training_config.yaml`:
 
 ```yaml
 model_size: 'm'      # Model architecture
+task: 'detect'       # Task: detect or obb
+model_name: null     # Optional explicit checkpoint (e.g. yolo26m-obb.pt)
 epochs: 50           # Number of epochs to train
 batch_size: 32       # Batch size (adjust based on GPU memory)
 imgsz: 640          # Image size
@@ -132,6 +134,7 @@ python train.py
 ```bash
 python train.py \
     --data configs/dataset_config.yaml \
+    --task detect \
     --epochs 100 \
     --batch-size 32 \
     --imgsz 640 \
@@ -140,6 +143,15 @@ python train.py \
     --weight-decay 0.0005 \
     --patience 20 \
     --validate
+```
+
+### OBB Training
+```bash
+python train.py \
+    --data configs/dataset_config.yaml \
+    --task obb \
+    --model-name yolo26m-obb.pt \
+    --epochs 100
 ```
 
 ### Resume Training
@@ -155,10 +167,38 @@ python train.py \
 ```bash
 python infer.py \
     --weights runs/detect/train/weights/best.pt \
+    --task detect \
     --source images/test.jpg \
     --mode image \
     --conf 0.5
 ```
+
+### OBB Inference
+```bash
+python infer.py \
+    --weights runs/run/weights/best.pt \
+    --task obb \
+    --source images/test.jpg \
+    --mode image
+```
+
+### Save Annotated Image and YOLO TXT (Image Mode)
+```bash
+python infer.py \
+    --weights runs/run7/weights/best.pt \
+    --task obb \
+    --source images/test.jpg \
+    --mode image \
+    --output runs/infer/test_annotated.jpg \
+    --save-txt \
+    --txt-output runs/infer/test.txt
+```
+
+Notes:
+- `--output` saves annotated image for image mode.
+- `--save-txt` exports predictions in YOLO format.
+- `--txt-output` is optional. If omitted, the txt name is derived from source/output path.
+- `--save-conf` appends confidence to each prediction row.
 
 ### Batch Inference
 ```bash
@@ -192,9 +232,35 @@ python infer.py \
 ```bash
 python evaluate.py \
     --weights runs/detect/train/weights/best.pt \
+    --task detect \
     --test-dir datasets/my_dataset/images/test \
     --output results.json \
     --conf 0.5
+```
+
+## Label Conversion for OBB Training
+
+If your label format is:
+```text
+class_id x y w h r
+```
+you can convert it to YOLO OBB corner format:
+```text
+class_id x1 y1 x2 y2 x3 y3 x4 y4
+```
+
+### Convert In-Place
+```bash
+python convert_obb_labels.py \
+    --input-dir datasets/homecare/labels/train
+```
+
+### Convert to Another Directory
+```bash
+python convert_obb_labels.py \
+    --input-dir datasets/homecare/labels/train \
+    --output-dir datasets/homecare/labels/train_obb \
+    --angle-unit degrees
 ```
 
 ## Python API Usage
@@ -225,7 +291,7 @@ from src.models import YOLOModel
 from src.inference import YOLOPredictor
 
 # Load model
-model = YOLOModel(model_size='m')
+model = YOLOModel(model_size='m', task='detect')
 model.load_weights('runs/detect/train/weights/best.pt')
 
 # Create predictor
@@ -234,6 +300,10 @@ predictor = YOLOPredictor(model, conf_threshold=0.5)
 # Predict
 results = predictor.predict_image('test.jpg')
 print(f"Found {len(results['detections'])} objects")
+
+# Save artifacts
+predictor.save_annotated_image('test.jpg', results, 'runs/infer/test_annotated.jpg')
+predictor.save_yolo_txt(results, 'runs/infer/test.txt', save_conf=False)
 
 for det in results['detections']:
     print(f"{det['class_name']}: {det['confidence']:.2f}")
@@ -247,6 +317,14 @@ image_paths = list(Path('test_images').glob('*.jpg'))
 results = predictor.predict_batch(image_paths)
 
 print(f"Processed {len(results)} images")
+```
+
+### Converter API
+```python
+from src.data import convert_line_xywhr_to_obb, convert_folder_xywhr_to_obb
+
+line = convert_line_xywhr_to_obb('0 0.5 0.5 0.2 0.1 0.785398', angle_unit='radians')
+converted = convert_folder_xywhr_to_obb('labels_in', output_dir='labels_out')
 ```
 
 ## GPU Configuration

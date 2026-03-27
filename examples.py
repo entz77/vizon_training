@@ -20,7 +20,7 @@ def example_training():
     device = get_device()
     
     # Initialize trainer
-    trainer = YOLOTrainer(config_path='configs/training_config.yaml')
+    trainer = YOLOTrainer(config_path='configs/training_config.yaml', task='detect')
     
     # Train (ensure dataset YAML exists)
     # results = trainer.train(
@@ -29,6 +29,7 @@ def example_training():
     #     batch_size=16,
     #     imgsz=640
     # )
+    # For oriented boxes, switch task to 'obb' and use OBB-formatted labels.
     
     print("Training example code ready (uncomment to run)")
 
@@ -40,13 +41,14 @@ def example_inference():
     print("=" * 50)
     
     # Load model
-    model = YOLOModel(model_size='m')
+    model = YOLOModel(model_size='m', task='detect')
     
     # Initialize predictor
     predictor = YOLOPredictor(model, conf_threshold=0.5)
     
     # Predict on image
     # results = predictor.predict_image('path/to/image.jpg')
+    # For OBB inference: YOLOModel(model_size='m', task='obb')
     # print(f"Detections: {len(results['detections'])}")
     
     print("Inference example code ready (uncomment to run)")
@@ -59,7 +61,7 @@ def example_evaluation():
     print("=" * 50)
     
     # Load model
-    model = YOLOModel(model_size='m')
+    model = YOLOModel(model_size='m', task='detect')
     model.load_weights('path/to/weights.pt')
     
     # Evaluate
