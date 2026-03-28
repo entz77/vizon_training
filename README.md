@@ -357,6 +357,62 @@ Ensure your dataset is in correct YOLO format:
 - Labels: `.txt` files with same names as images
 - Coordinates: Normalized (0-1)
 
+<!-- ...existing code... -->
+
+## Label conversion
+
+The project includes utilities in `src/data/label_converter.py` for converting labels from rotated box format:
+
+- Input format: `class_id x y w h r`
+
+Supported outputs:
+
+1. **YOLO OBB format**
+   - Output: `class_id x1 y1 x2 y2 x3 y3 x4 y4`
+   - Uses the rotation value `r`
+
+2. **Standard YOLO detection format**
+   - Output: `class_id x y w h`
+   - Drops the rotation value `r`
+
+### Available functions
+
+- `convert_line_xywhr_to_obb(line, angle_unit="radians", precision=6)`
+- `convert_file_xywhr_to_obb(input_path, output_path=None, angle_unit="radians", precision=6)`
+- `convert_folder_xywhr_to_obb(input_dir, output_dir=None, angle_unit="radians", precision=6, pattern="*.txt")`
+
+- `convert_line_xywhr_to_xywh(line, precision=6)`
+- `convert_file_xywhr_to_xywh(input_path, output_path=None, precision=6)`
+- `convert_folder_xywhr_to_xywh(input_dir, output_dir=None, precision=6, pattern="*.txt")`
+
+### Notes
+
+- `x`, `y`, `w`, and `h` are expected to already be YOLO-normalized.
+- `r` is only used for OBB conversion.
+- If `output_path` or `output_dir` is not provided, conversion is done in-place.
+
+### Example
+
+````python
+from pathlib import Path
+
+from src.data.label_converter import (
+    convert_file_xywhr_to_obb,
+    convert_file_xywhr_to_xywh,
+)
+
+convert_file_xywhr_to_obb(
+    input_path=Path("labels/sample.txt"),
+    output_path=Path("labels_obb/sample.txt"),
+    angle_unit="radians",
+)
+
+convert_file_xywhr_to_xywh(
+    input_path=Path("labels/sample.txt"),
+    output_path=Path("labels_yolo/sample.txt"),
+)
+````
+
 ## Future Improvements
 
 - [ ] Multi-GPU training support

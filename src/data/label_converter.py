@@ -2,7 +2,7 @@
 
 import math
 from pathlib import Path
-from typing import Iterable, List, Tuple
+from typing import List, Tuple
 
 
 def _rotated_box_to_corners(x: float, y: float, w: float, h: float, r: float) -> List[Tuple[float, float]]:
@@ -80,6 +80,37 @@ def convert_line_xywhr_to_obb(line: str, angle_unit: str = "radians", precision:
     return " ".join([class_id, *coord_values])
 
 
+def convert_line_xywhr_to_xywh(line: str, precision: int = 6) -> str:
+    """Convert one label line from `class_id x y w h r` to standard YOLO XYWH format.
+
+    Input line format:
+        class_id x y w h r
+
+    Output line format:
+        class_id x y w h
+    """
+    stripped = line.strip()
+    if not stripped:
+        return ""
+
+    parts = stripped.split()
+    if len(parts) != 6:
+        raise ValueError(f"Expected 6 values per line, got {len(parts)}: '{line.rstrip()}'")
+
+    class_id = parts[0]
+    x, y, w, h, _ = map(float, parts[1:])
+
+    return " ".join(
+        [
+            class_id,
+            f"{x:.{precision}f}",
+            f"{y:.{precision}f}",
+            f"{w:.{precision}f}",
+            f"{h:.{precision}f}",
+        ]
+    )
+
+
 def convert_file_xywhr_to_obb(
     input_path: Path,
     output_path: Path = None,
@@ -92,6 +123,23 @@ def convert_file_xywhr_to_obb(
 
     lines = input_path.read_text(encoding="utf-8").splitlines()
     converted = [convert_line_xywhr_to_obb(line, angle_unit=angle_unit, precision=precision) for line in lines]
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(converted) + "\n", encoding="utf-8")
+    return output_path
+
+
+def convert_file_xywhr_to_xywh(
+    input_path: Path,
+    output_path: Path = None,
+    precision: int = 6,
+) -> Path:
+    """Convert all lines in one label file from XYWHR format to standard YOLO XYWH format."""
+    input_path = Path(input_path)
+    output_path = Path(output_path) if output_path else input_path
+
+    lines = input_path.read_text(encoding="utf-8").splitlines()
+    converted = [convert_line_xywhr_to_xywh(line, precision=precision) for line in lines]
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(converted) + "\n", encoding="utf-8")
@@ -125,6 +173,38 @@ def convert_folder_xywhr_to_obb(
             input_path=src,
             output_path=dst,
             angle_unit=angle_unit,
+            precision=precision,
+        )
+        results.append((src, converted_path))
+
+    return results
+
+
+def convert_folder_xywhr_to_xywh(
+    input_dir: Path,
+    output_dir: Path = None,
+    precision: int = 6,
+    pattern: str = "*.txt",
+) -> List[Tuple[Path, Path]]:
+    """Convert every matching label file in a folder to standard YOLO XYWH format.
+
+    If output_dir is None, conversion happens in-place.
+    """
+    input_dir = Path(input_dir)
+    output_dir = Path(output_dir) if output_dir else input_dir
+
+    if not input_dir.exists() or not input_dir.is_dir():
+        raise ValueError(f"Invalid input directory: {input_dir}")
+
+    results: List[Tuple[Path, Path]] = []
+    for src in sorted(input_dir.glob(pattern)):
+        if not src.is_file():
+            continue
+
+        dst = output_dir / src.name
+        converted_path = convert_file_xywhr_to_xywh(
+            input_path=src,
+            output_path=dst,
             precision=precision,
         )
         results.append((src, converted_path))

@@ -2,14 +2,14 @@
 
 # Model settings
 model_size: 'l'  # Model size: n, s, m, l, x
-task: 'obb'   # Task type: detect or obb
+task: 'detect'   # Task type: detect or obb
 model_name: null # Optional explicit model checkpoint (e.g. yolo26m-obb.pt)
 
 # Training parameters
 epochs: 100
-batch_size: 24
-imgsz: 480
-patience: 20
+batch_size: 6
+imgsz: 640
+patience: 50
 
 # Learning rate parameters
 lr0: 0.01      # Initial learning rate
