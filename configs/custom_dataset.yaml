@@ -1,9 +1,6 @@
 names:
-- BOTTLE
-- JUG
-- REFILL POUCH
-- SACHET
-nc: 4
+- S_P
+nc: 1
 path: datasets
 test: images/test
 train: images/train
