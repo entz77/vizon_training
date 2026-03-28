@@ -8,6 +8,7 @@ epochs: 200
 batch_size: 32
 imgsz: 640
 patience: 20
+single_cls: true  # Treat all classes as a single class
 
 # Learning rate parameters
 lr0: 0.01      # Initial learning rate
@@ -30,11 +31,11 @@ fliplr: 0.5    # Flip left-right probability
 mosaic: 1.0    # Mosaic augmentation
 
 # Device and logging
-device: mps   # cuda, cpu, or null for auto
-verbose: true
+device: cpu   # cuda, cpu, or null for auto
+verbose: false
 save_period: 10
 
 # Directories
 data_dir: datasets
 log_dir: log
-output_dir: run
+output_dir: train

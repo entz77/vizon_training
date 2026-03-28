@@ -5,12 +5,23 @@ Main training script for YOLO object detection
 import argparse
 import sys
 from pathlib import Path
+import yaml
 
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.training import YOLOTrainer
 from utils import setup_seed, get_device
+
+
+def load_config_defaults(config_path):
+    """Load training config file to use as defaults"""
+    try:
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
+    except FileNotFoundError:
+        print(f"Warning: Config file not found at {config_path}")
+        return {}
 
 
 def main(args):
@@ -82,29 +93,33 @@ if __name__ == '__main__':
         help='Path to training configuration YAML file'
     )
     
-    # Training arguments
+    # Parse config argument first to load defaults
+    args, remaining = parser.parse_known_args()
+    config = load_config_defaults(args.config)
+    
+    # Now add remaining arguments with defaults from config
     parser.add_argument(
         '--epochs',
         type=int,
-        default=100,
+        default=config.get('epochs', 100),
         help='Number of training epochs'
     )
     parser.add_argument(
         '--batch-size',
         type=int,
-        default=32,
+        default=config.get('batch_size', 32),
         help='Batch size for training'
     )
     parser.add_argument(
         '--imgsz',
         type=int,
-        default=640,
+        default=config.get('imgsz', 640),
         help='Input image size'
     )
     parser.add_argument(
         '--patience',
         type=int,
-        default=20,
+        default=config.get('patience', 20),
         help='Early stopping patience'
     )
     
@@ -112,13 +127,13 @@ if __name__ == '__main__':
     parser.add_argument(
         '--lr0',
         type=float,
-        default=0.01,
+        default=config.get('lr0', 0.01),
         help='Initial learning rate'
     )
     parser.add_argument(
         '--lrf',
         type=float,
-        default=0.01,
+        default=config.get('lrf', 0.01),
         help='Final learning rate ratio'
     )
     
@@ -126,19 +141,19 @@ if __name__ == '__main__':
     parser.add_argument(
         '--momentum',
         type=float,
-        default=0.937,
+        default=config.get('momentum', 0.937),
         help='SGD momentum'
     )
     parser.add_argument(
         '--weight-decay',
         type=float,
-        default=0.0005,
+        default=config.get('weight_decay', 0.0005),
         help='Weight decay'
     )
     parser.add_argument(
         '--warmup-epochs',
         type=int,
-        default=3,
+        default=config.get('warmup_epochs', 3),
         help='Warmup epochs'
     )
     
@@ -146,13 +161,13 @@ if __name__ == '__main__':
     parser.add_argument(
         '--save-dir',
         type=str,
-        default='runs/train',
+        default=config.get('output_dir', 'runs/train'),
         help='Directory to save training results'
     )
     parser.add_argument(
         '--log-dir',
         type=str,
-        default='logs',
+        default=config.get('log_dir', 'logs'),
         help='Directory to save logs'
     )
     

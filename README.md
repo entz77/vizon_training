@@ -84,7 +84,98 @@ Each image in `labels/` should have a corresponding `.txt` file with annotations
 ```
 (All coordinates normalized to [0, 1])
 
-### 2. Configure Dataset
+### 2. Label Conversion Utilities
+
+The framework provides utilities to convert between different label formats:
+
+#### Convert XYWHR to OBB Format (Rotated Bboxes)
+Convert from `class_id x y w h r` (rotated bounding box) to YOLO OBB format:
+
+**CLI:**
+```bash
+python -c "from src.data.label_converter import convert_folder_xywhr_to_obb; \
+convert_folder_xywhr_to_obb('input_labels', 'output_labels')"
+```
+
+**Python API:**
+```python
+from src.data.label_converter import convert_folder_xywhr_to_obb, convert_file_xywhr_to_obb
+
+# Convert entire folder
+results = convert_folder_xywhr_to_obb(
+    input_dir='datasets/labels_rotated',
+    output_dir='datasets/labels_obb',
+    angle_unit='radians',  # or 'degrees'
+    precision=6
+)
+
+# Convert single file
+convert_file_xywhr_to_obb(
+    input_path='labels/image1.txt',
+    output_path='labels_obb/image1.txt'
+)
+```
+
+#### Convert XYWHR to Standard YOLO XYWH Format
+Convert from `class_id x y w h r` to standard YOLO `class_id x y w h` format:
+
+**CLI:**
+```bash
+python convert_xywhr_to_xywh.py --input-dir datasets/labels_rotated --output-dir datasets/labels
+python convert_xywhr_to_xywh.py --input-dir in_labels --output-dir out_labels --precision 6
+```
+
+**Python API:**
+```python
+from src.data.label_converter import convert_folder_xywhr_to_xywh, convert_file_xywhr_to_xywh
+
+# Convert entire folder
+results = convert_folder_xywhr_to_xywh(
+    input_dir='datasets/labels_rotated',
+    output_dir='datasets/labels',
+    precision=6
+)
+
+# Convert single file
+convert_file_xywhr_to_xywh(
+    input_path='labels/image1.txt',
+    output_path='labels/image1_converted.txt',
+    precision=6
+)
+```
+
+#### Convert Class IDs to 0
+Convert all class IDs in label files to 0 (useful for single-class models or data preparation):
+
+**CLI:**
+```bash
+python convert_class_id_to_zero.py --input-dir datasets/labels
+python convert_class_id_to_zero.py --input-dir in_labels --output-dir out_labels
+```
+
+**Python API:**
+```python
+from src.data.label_converter import convert_folder_class_id_to_zero, convert_file_class_id_to_zero
+
+# Convert entire folder (in-place)
+results = convert_folder_class_id_to_zero(
+    input_dir='datasets/labels'
+)
+
+# Convert with output directory
+results = convert_folder_class_id_to_zero(
+    input_dir='datasets/labels',
+    output_dir='datasets/labels_zero_class'
+)
+
+# Convert single file
+convert_file_class_id_to_zero(
+    input_path='labels/image1.txt',
+    output_path='labels/image1_zero_class.txt'
+)
+```
+
+### 3. Configure Dataset
 
 Edit `configs/dataset_config.yaml`:
 ```yaml
@@ -96,7 +187,7 @@ nc: 5  # Number of classes
 names: ['class1', 'class2', 'class3', 'class4', 'class5']
 ```
 
-### 3. Train Model
+### 4. Train Model
 
 ```bash
 python train.py \
@@ -107,7 +198,7 @@ python train.py \
     --validate
 ```
 
-### 4. Run Inference
+### 5. Run Inference
 
 **On a single image:**
 ```bash
@@ -135,7 +226,7 @@ python infer.py \
     --output webcam_output.mp4
 ```
 
-### 5. Evaluate Model
+### 6. Evaluate Model
 
 ```bash
 python evaluate.py \

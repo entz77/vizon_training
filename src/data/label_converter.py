@@ -210,3 +210,76 @@ def convert_folder_xywhr_to_xywh(
         results.append((src, converted_path))
 
     return results
+
+
+def convert_line_class_id_to_zero(line: str) -> str:
+    """Convert class ID in a label line to 0, keeping all coordinates unchanged.
+
+    Input line format:
+        class_id x1 y1 ... (any format with at least the first value as class_id)
+
+    Output line format:
+        0 x1 y1 ... (all coordinates preserved)
+
+    Args:
+        line: Label line text.
+
+    Returns:
+        Converted line with class_id replaced by 0 (or original blank line).
+    """
+    stripped = line.strip()
+    if not stripped:
+        return ""
+
+    parts = stripped.split()
+    if len(parts) < 2:
+        raise ValueError(f"Expected at least 2 values per line, got {len(parts)}: '{line.rstrip()}'")
+
+    # Replace class_id with 0, keep all other values unchanged
+    return " ".join(["0", *parts[1:]])
+
+
+def convert_file_class_id_to_zero(
+    input_path: Path,
+    output_path: Path = None,
+) -> Path:
+    """Convert all class IDs in one label file to 0."""
+    input_path = Path(input_path)
+    output_path = Path(output_path) if output_path else input_path
+
+    lines = input_path.read_text(encoding="utf-8").splitlines()
+    converted = [convert_line_class_id_to_zero(line) for line in lines]
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(converted) + "\n", encoding="utf-8")
+    return output_path
+
+
+def convert_folder_class_id_to_zero(
+    input_dir: Path,
+    output_dir: Path = None,
+    pattern: str = "*.txt",
+) -> List[Tuple[Path, Path]]:
+    """Convert all class IDs to 0 in every matching label file in a folder.
+
+    If output_dir is None, conversion happens in-place.
+    """
+    input_dir = Path(input_dir)
+    output_dir = Path(output_dir) if output_dir else input_dir
+
+    if not input_dir.exists() or not input_dir.is_dir():
+        raise ValueError(f"Invalid input directory: {input_dir}")
+
+    results: List[Tuple[Path, Path]] = []
+    for src in sorted(input_dir.glob(pattern)):
+        if not src.is_file():
+            continue
+
+        dst = output_dir / src.name
+        converted_path = convert_file_class_id_to_zero(
+            input_path=src,
+            output_path=dst,
+        )
+        results.append((src, converted_path))
+
+    return results

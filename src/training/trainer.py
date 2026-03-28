@@ -113,6 +113,20 @@ class YOLOTrainer:
         self.logger.info(f"Batch Size: {batch_size}")
         self.logger.info(f"Image Size: {imgsz}")
         
+        # Extract additional parameters from config
+        kwargs = {
+            'lr0': lr0,
+            'lrf': lrf,
+            'momentum': momentum,
+            'weight_decay': weight_decay,
+            'warmup_epochs': warmup_epochs,
+        }
+        
+        # Add single_cls if specified in config
+        if self.config.get('single_cls', False):
+            kwargs['single_cls'] = True
+            self.logger.info("Training with single_cls=True")
+        
         # Train
         results = self.model.train(
             data_yaml=data_yaml,
@@ -122,12 +136,8 @@ class YOLOTrainer:
             patience=patience,
             save_dir=save_dir,
             device=self.model.device,
-            lr0=lr0,
-            lrf=lrf,
-            momentum=momentum,
-            weight_decay=weight_decay,
-            warmup_epochs=warmup_epochs,
-            verbose=True
+            verbose=True,
+            **kwargs
         )
         
         self.logger.info("Training completed successfully!")
