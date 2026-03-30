@@ -4,8 +4,8 @@
 model_size: 'm'  # Model size: n, s, m, l, x
 
 # Training parameters
-epochs: 200
-batch_size: 32
+epochs: 100
+batch_size: 24
 imgsz: 640
 patience: 20
 single_cls: true  # Treat all classes as a single class
@@ -15,27 +15,28 @@ lr0: 0.01      # Initial learning rate
 lrf: 0.01      # Final learning rate ratio
 
 # Optimizer parameters
-momentum: 0.937
-weight_decay: 0.0005
-warmup_epochs: 3
+# momentum: 0.937
+# weight_decay: 0.0005
+# warmup_epochs: 3
 
-# Data augmentation
-hsv_h: 0.015   # HSV-Hue augmentation
-hsv_s: 0.7     # HSV-Saturation augmentation
-hsv_v: 0.4     # HSV-Value augmentation
-degrees: 0.0   # Rotation augmentation
-translate: 0.1 # Translation augmentation
-scale: 0.5     # Scale augmentation
-flipud: 0.0    # Flip upside-down probability
-fliplr: 0.5    # Flip left-right probability
-mosaic: 1.0    # Mosaic augmentation
+# # Data augmentation
+# hsv_h: 0.015   # HSV-Hue augmentation
+# hsv_s: 0.7     # HSV-Saturation augmentation
+# hsv_v: 0.4     # HSV-Value augmentation
+# degrees: 0.0   # Rotation augmentation
+# translate: 0.1 # Translation augmentation
+# scale: 0.5     # Scale augmentation
+# flipud: 0.0    # Flip upside-down probability
+# fliplr: 0.5    # Flip left-right probability
+# mosaic: 1.0    # Mosaic augmentation
 
 # Device and logging
-device: cpu   # cuda, cpu, or null for auto
+device: null   # null for auto-detect (GPU if available, else CPU)
 verbose: false
 save_period: 10
 
 # Directories
 data_dir: datasets
-log_dir: log
-output_dir: train
+log_dir: logs
+output_dir: train  # Ultralytics will auto-increment: train, train1, train2, etc. in runs/ folder
+

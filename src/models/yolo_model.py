@@ -50,7 +50,7 @@ class YOLOModel:
             batch_size (int): Batch size for training
             imgsz (int): Input image size
             patience (int): Early stopping patience
-            save_dir (str): Directory to save results
+            save_dir (str): Directory to save results (uses project/name for auto-incrementing)
             resume (bool): Resume from last checkpoint
             device (str): Device to use for training
             **kwargs: Additional training arguments
@@ -60,6 +60,8 @@ class YOLOModel:
         """
         device = device or self.device
         
+        # Use project and name for auto-incrementing instead of save_dir
+        # This will create runs/train, runs/train1, runs/train2, etc.
         results = self.model.train(
             data=data_yaml,
             epochs=epochs,
@@ -67,7 +69,8 @@ class YOLOModel:
             batch=batch_size,
             patience=patience,
             device=device,
-            save_dir=save_dir,
+            project='runs',
+            name=save_dir,
             resume=resume,
             **kwargs
         )
