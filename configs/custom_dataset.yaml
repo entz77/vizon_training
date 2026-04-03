@@ -1,7 +1,7 @@
 names:
-- S_P
+- RTD
 nc: 1
-path: datasets
+path: datasets/rtd
 test: images/test
 train: images/train
 val: images/val

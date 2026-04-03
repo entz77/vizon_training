@@ -1,4 +1,4 @@
-# Vizon Backend - YOLO Object Detection Training Framework
+# Vizon - YOLO Object Detection Training Framework
 
 A comprehensive Python framework for training, evaluating, and deploying Ultralytics YOLOv8 models for object detection.
 
