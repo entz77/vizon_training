@@ -221,6 +221,94 @@ results = convert_folder_class_id_by_map(
 )
 ```
 
+#### Crop Bounding Boxes from Images
+Extract and save individual bounding boxes from images organized by class (useful for creating focused datasets or data augmentation):
+
+**Configuration:**
+You can optionally use `src/data/bbox_crop_config.yaml` to filter which classes to include:
+```yaml
+# src/data/bbox_crop_config.yaml
+include_classes:
+  - BOTTLE
+  - JUG
+  - REFILL POUCH
+  - SACHET
+```
+If no config is provided, all classes are included.
+
+**CLI:**
+```bash
+# Crop all classes
+python src/data/bbox_cropper.py \
+    --images-dir datasets/homecare/images/train \
+    --labels-dir datasets/homecare/labels/train \
+    --output-dir ./crops_homecare \
+    --classes-file datasets/homecare/classes.txt
+
+# Crop with class filtering using config
+python src/data/bbox_cropper.py \
+    --images-dir datasets/homecare/images/train \
+    --labels-dir datasets/homecare/labels/train \
+    --output-dir ./crops_homecare \
+    --classes-file datasets/homecare/classes.txt \
+    --config-file src/data/bbox_crop_config.yaml
+
+# Crop with optional padding
+python src/data/bbox_cropper.py \
+    --images-dir datasets/homecare/images/train \
+    --labels-dir datasets/homecare/labels/train \
+    --output-dir ./crops_homecare \
+    --classes-file datasets/homecare/classes.txt \
+    --padding 10
+```
+
+**Python API:**
+```python
+from src.data.bbox_cropper import BBoxCropper
+from pathlib import Path
+
+# Crop all classes
+cropper = BBoxCropper(
+    images_dir='datasets/homecare/images/train',
+    labels_dir='datasets/homecare/labels/train',
+    output_dir='./crops_homecare',
+    classes_file='datasets/homecare/classes.txt',
+)
+
+# Crop with class filtering
+cropper = BBoxCropper(
+    images_dir='datasets/homecare/images/train',
+    labels_dir='datasets/homecare/labels/train',
+    output_dir='./crops_homecare',
+    classes_file='datasets/homecare/classes.txt',
+    config_file='src/data/bbox_crop_config.yaml',  # Optional
+    padding=10  # Optional: add padding around crops
+)
+
+# Process all images
+stats = cropper.process_folder()
+
+# Print summary
+cropper.print_summary()
+```
+
+**Output Structure:**
+```
+crops_homecare/
+├── BOTTLE/
+│   ├── image1_0.jpg
+│   ├── image1_1.jpg
+│   └── image2_0.jpg
+├── JUG/
+│   └── image3_0.jpg
+├── REFILL POUCH/
+│   └── image1_2.jpg
+└── SACHET/
+    └── image4_0.jpg
+```
+
+Crops are named `{original_image_name}_{crop_number}.jpg` and organized into subdirectories by class name.
+
 ### 3. Configure Dataset
 
 Edit `configs/dataset_config.yaml`:

@@ -1,0 +1,13 @@
+# Configuration for BBox Cropper
+# Specify which classes to include when cropping bounding boxes
+
+# List of class names to include in cropping
+# If empty or not specified, all classes from classes.txt will be included
+# Remove or comment out classes you want to exclude
+include_classes:
+  - BOTTLE
+  - JUG
+  - REFILL POUCH
+  - SACHET
+
+# Optional: Add any other settings here for future use
