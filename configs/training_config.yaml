@@ -8,7 +8,7 @@ epochs: 100
 batch_size: 24
 imgsz: 640
 patience: 20
-single_cls: true  # Treat all classes as a single class
+single_cls: false  # Treat all classes as a single class
 
 # Learning rate parameters
 lr0: 0.01      # Initial learning rate

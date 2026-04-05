@@ -9,8 +9,9 @@ val: ./images/val
 test: ./images/test
 
 # Number of classes
-nc: 1
+nc: 2
 
 # Class names
 names:
   0: RTD
+  1: Shelf

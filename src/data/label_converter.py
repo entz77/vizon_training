@@ -2,7 +2,9 @@
 
 import math
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
+
+import yaml
 
 
 def _rotated_box_to_corners(x: float, y: float, w: float, h: float, r: float) -> List[Tuple[float, float]]:
@@ -283,3 +285,132 @@ def convert_folder_class_id_to_zero(
         results.append((src, converted_path))
 
     return results
+
+
+def convert_line_class_id_by_map(line: str, class_id_map: Dict[int, int]) -> str:
+    """Convert class ID in a label line using a mapping dictionary.
+
+    Input line format:
+        class_id x1 y1 ... (any format with at least the first value as class_id)
+
+    Output line format:
+        mapped_class_id x1 y1 ... (all coordinates preserved)
+
+    Args:
+        line: Label line text.
+        class_id_map: Dictionary mapping original class IDs to new class IDs.
+
+    Returns:
+        Converted line with class_id replaced by mapped value (or original blank line).
+        If class_id is not in the map, the original class_id is kept.
+
+    Raises:
+        ValueError: If line doesn't have at least 2 values.
+    """
+    stripped = line.strip()
+    if not stripped:
+        return ""
+
+    parts = stripped.split()
+    if len(parts) < 2:
+        raise ValueError(f"Expected at least 2 values per line, got {len(parts)}: '{line.rstrip()}'")
+
+    original_class_id = int(parts[0])
+    new_class_id = class_id_map.get(original_class_id, original_class_id)
+
+    return " ".join([str(new_class_id), *parts[1:]])
+
+
+def convert_file_class_id_by_map(
+    input_path: Path,
+    class_id_map: Dict[int, int],
+    output_path: Path = None,
+) -> Path:
+    """Convert all class IDs in one label file using a mapping dictionary."""
+    input_path = Path(input_path)
+    output_path = Path(output_path) if output_path else input_path
+
+    lines = input_path.read_text(encoding="utf-8").splitlines()
+    converted = [convert_line_class_id_by_map(line, class_id_map) for line in lines]
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("\n".join(converted) + "\n", encoding="utf-8")
+    return output_path
+
+
+def convert_folder_class_id_by_map(
+    input_dir: Path,
+    class_id_map: Dict[int, int],
+    output_dir: Path = None,
+    pattern: str = "*.txt",
+) -> List[Tuple[Path, Path]]:
+    """Convert all class IDs using a mapping in every matching label file in a folder.
+
+    If output_dir is None, conversion happens in-place.
+
+    Args:
+        input_dir: Directory containing source label files.
+        class_id_map: Dictionary mapping original class IDs to new class IDs.
+        output_dir: Directory for converted labels. If None, converts in-place.
+        pattern: Glob pattern for label files.
+
+    Returns:
+        List of tuples (source_path, destination_path) for all converted files.
+    """
+    input_dir = Path(input_dir)
+    output_dir = Path(output_dir) if output_dir else input_dir
+
+    if not input_dir.exists() or not input_dir.is_dir():
+        raise ValueError(f"Invalid input directory: {input_dir}")
+
+    results: List[Tuple[Path, Path]] = []
+    for src in sorted(input_dir.glob(pattern)):
+        if not src.is_file():
+            continue
+
+        dst = output_dir / src.name
+        converted_path = convert_file_class_id_by_map(
+            input_path=src,
+            class_id_map=class_id_map,
+            output_path=dst,
+        )
+        results.append((src, converted_path))
+
+    return results
+
+
+def load_class_id_map_from_yaml(yaml_path: Path) -> Dict[int, int]:
+    """Load class ID mapping from a YAML configuration file.
+
+    Expected YAML format:
+        class_id_map:
+          0: 2
+          1: 1
+          2: 0
+
+    Args:
+        yaml_path: Path to the YAML mapping file.
+
+    Returns:
+        Dictionary mapping original class IDs to new class IDs.
+
+    Raises:
+        FileNotFoundError: If YAML file doesn't exist.
+        ValueError: If YAML format is invalid or 'class_id_map' key is missing.
+    """
+    yaml_path = Path(yaml_path)
+    if not yaml_path.exists():
+        raise FileNotFoundError(f"YAML mapping file not found: {yaml_path}")
+
+    with open(yaml_path, "r", encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    if not isinstance(config, dict) or "class_id_map" not in config:
+        raise ValueError(f"Invalid YAML format. Expected 'class_id_map' key at root level in {yaml_path}")
+
+    class_id_map_raw = config["class_id_map"]
+    if not isinstance(class_id_map_raw, dict):
+        raise ValueError(f"'class_id_map' must be a dictionary in {yaml_path}")
+
+    # Convert all keys and values to integers
+    return {int(k): int(v) for k, v in class_id_map_raw.items()}

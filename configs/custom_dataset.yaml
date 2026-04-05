@@ -1,6 +1,7 @@
 names:
 - RTD
-nc: 1
+- Shelf
+nc: 2
 path: datasets/rtd
 test: images/test
 train: images/train

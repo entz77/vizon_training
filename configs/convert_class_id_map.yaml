@@ -1,0 +1,8 @@
+# Class ID mapping configuration for converting class IDs in label files
+# Maps original class IDs to new class IDs
+# Example: 0: 2 means class ID 0 will be converted to class ID 2
+
+class_id_map:
+  95: 0
+  96: 0
+  101: 1

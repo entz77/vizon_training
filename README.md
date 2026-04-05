@@ -175,6 +175,52 @@ convert_file_class_id_to_zero(
 )
 ```
 
+#### Convert Class IDs Using Custom Mapping
+Convert class IDs in label files using a custom mapping defined in a YAML configuration file (useful for remapping class indices or consolidating multiple classes):
+
+**Setup mapping configuration** (`configs/convert_class_id_map.yaml`):
+```yaml
+class_id_map:
+  95: 0    # Map original class ID 95 to 0
+  101: 1   # Map original class ID 101 to 1
+  # Add more mappings as needed
+```
+
+**CLI:**
+```bash
+python convert_class_id_by_map.py --input-dir datasets/labels --map-config configs/convert_class_id_map.yaml
+python convert_class_id_by_map.py --input-dir in_labels --output-dir out_labels --map-config configs/convert_class_id_map.yaml
+```
+
+**Python API:**
+```python
+from src.data.label_converter import convert_folder_class_id_by_map, load_class_id_map_from_yaml
+from pathlib import Path
+
+# Load mapping from YAML
+class_id_map = load_class_id_map_from_yaml(Path('configs/convert_class_id_map.yaml'))
+
+# Convert entire folder (in-place)
+results = convert_folder_class_id_by_map(
+    input_dir='datasets/labels',
+    class_id_map=class_id_map
+)
+
+# Convert with output directory
+results = convert_folder_class_id_by_map(
+    input_dir='datasets/labels',
+    class_id_map=class_id_map,
+    output_dir='datasets/labels_remapped'
+)
+
+# Or use mapping directly
+custom_map = {95: 0, 101: 1, 102: 1}
+results = convert_folder_class_id_by_map(
+    input_dir='datasets/labels',
+    class_id_map=custom_map
+)
+```
+
 ### 3. Configure Dataset
 
 Edit `configs/dataset_config.yaml`:
