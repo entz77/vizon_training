@@ -5,7 +5,7 @@ YOLO Inference and Prediction Module
 import cv2
 import numpy as np
 from pathlib import Path
-from typing import Union, List, Tuple
+from typing import Union, List, Tuple, Optional, Dict
 import torch
 
 
@@ -15,7 +15,7 @@ class YOLOPredictor:
     Handles predictions on images, videos, and real-time streams.
     """
     
-    def __init__(self, model, conf_threshold=0.5, iou_threshold=0.45):
+    def __init__(self, model, conf_threshold=0.5, iou_threshold=0.45, class_id_map: Optional[Dict[int, int]] = None):
         """
         Initialize predictor.
         
@@ -23,10 +23,14 @@ class YOLOPredictor:
             model: YOLOModel instance
             conf_threshold (float): Confidence threshold
             iou_threshold (float): IOU threshold for NMS
+            class_id_map (dict): Optional mapping of class IDs. Maps original class IDs to new class IDs.
+                                 If not provided, uses the model's class_id_map if available.
         """
         self.model = model
         self.conf_threshold = conf_threshold
         self.iou_threshold = iou_threshold
+        # Use provided mapping or fall back to model's mapping
+        self.class_id_map = class_id_map if class_id_map is not None else getattr(model, 'class_id_map', None)
     
     def predict_image(self, image_path: str):
         """
@@ -188,15 +192,21 @@ class YOLOPredictor:
         
         return predictions
     
-    @staticmethod
-    def _format_results(result):
-        """Format YOLO results into standardized dict"""
+    def _format_results(self, result):
+        """Format YOLO results into standardized dict, applying class ID mapping if available"""
         detections = []
         
         if result.boxes is not None:
             for box in result.boxes:
+                original_class_id = int(box.cls[0]) if box.cls is not None else -1
+                # Apply class ID mapping if available
+                mapped_class_id = original_class_id
+                if self.class_id_map is not None and original_class_id in self.class_id_map:
+                    mapped_class_id = self.class_id_map[original_class_id]
+                
                 detection = {
-                    'class_id': int(box.cls[0]) if box.cls is not None else -1,
+                    'class_id': mapped_class_id,
+                    'original_class_id': original_class_id if original_class_id != mapped_class_id else None,
                     'class_name': result.names[int(box.cls[0])] if box.cls is not None else 'Unknown',
                     'confidence': float(box.conf[0]) if box.conf is not None else 0,
                     'bbox': {
@@ -219,6 +229,26 @@ class YOLOPredictor:
             'detections': detections,
             'image_shape': result.orig_shape if hasattr(result, 'orig_shape') else None
         }
+    
+    def load_class_id_map(self, yaml_path):
+        """
+        Load class ID mapping from a YAML configuration file.
+        
+        Args:
+            yaml_path (str or Path): Path to the YAML mapping file
+            
+        Example YAML format:
+            class_id_map:
+              0: 2
+              1: 1
+              2: 0
+        
+        Returns:
+            dict: The loaded class ID mapping
+        """
+        from src.data.label_converter import load_class_id_map_from_yaml
+        self.class_id_map = load_class_id_map_from_yaml(Path(yaml_path))
+        return self.class_id_map
     
     @staticmethod
     def _draw_boxes(frame, predictions, thickness=2, font_scale=0.6):

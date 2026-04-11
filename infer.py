@@ -24,6 +24,11 @@ def main(args):
     model = YOLOModel(device=args.device)
     model.load_weights(args.weights)
     
+    # Load class ID mapping if provided
+    if args.class_id_map:
+        print(f"Loading class ID mapping: {args.class_id_map}")
+        model.load_class_id_map(args.class_id_map)
+    
     # Initialize predictor
     predictor = YOLOPredictor(
         model=model,
@@ -38,7 +43,7 @@ def main(args):
         print(f"Detections: {len(results['detections'])}")
         
         for det in results['detections']:
-            print(f"  - {det['class_name']}: {det['confidence']:.2f}")
+            print(f"  - Class ID: {det['class_id']}, {det['class_name']}, Confidence: {det['confidence']:.2f}")
     
     elif args.mode == 'video':
         print(f"Predicting on video: {args.source}")
@@ -113,7 +118,7 @@ if __name__ == '__main__':
     parser.add_argument(
         '--device',
         type=str,
-        default='cuda',
+        default='cpu',
         choices=['cuda', 'cpu'],
         help='Device to use'
     )
@@ -128,6 +133,12 @@ if __name__ == '__main__':
         type=int,
         default=30,
         help='FPS for video output'
+    )
+    parser.add_argument(
+        '--class-id-map',
+        type=str,
+        default=None,
+        help='Path to YAML file with class ID mapping (e.g., configs/convert_class_id_map.yaml)'
     )
     
     args = parser.parse_args()

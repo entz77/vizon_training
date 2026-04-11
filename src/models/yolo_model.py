@@ -5,7 +5,7 @@ YOLO Model wrapper using Ultralytics YOLO26
 import torch
 from ultralytics import YOLO
 from pathlib import Path
-
+from typing import Optional, Dict
 
 class YOLOModel:
     """
@@ -13,7 +13,7 @@ class YOLOModel:
     Provides easy interface for loading, training, and inference.
     """
     
-    def __init__(self, model_size='m', device=None):
+    def __init__(self, model_size='m', device=None, class_id_map: Optional[Dict[int, int]] = None):
         """
         Initialize YOLO model.
         
@@ -21,9 +21,11 @@ class YOLOModel:
             model_size (str): Model size - 'n' (nano), 's' (small), 'm' (medium),
                             'l' (large), 'x' (extra large)
             device (str): Device to use - 'cuda' or 'cpu'. Auto-detected if None.
+            class_id_map (dict): Optional mapping of class IDs. Maps original class IDs to new class IDs.
         """
         self.model_size = model_size
         self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.class_id_map = class_id_map
         
         # Initialize model
         self.model = YOLO(f'yolo26{model_size}.pt')
@@ -143,17 +145,44 @@ class YOLOModel:
     def load_weights(self, weights_path):
         """
         Load pretrained weights.
+        Automatically loads accompanying mapping file if it exists (e.g., best.pt → best.mapping.yaml)
         
         Args:
             weights_path (str): Path to weights file
         """
         self.model = YOLO(weights_path)
         self.model.to(self.device)
+        
+        # Auto-load mapping file if it exists alongside the model
+        weights_path = Path(weights_path)
+        mapping_file = weights_path.parent / f"{weights_path.stem}.mapping.yaml"
+        if mapping_file.exists():
+            print(f"Auto-loading mapping file: {mapping_file}")
+            self.load_class_id_map(str(mapping_file))
+    
+    def load_class_id_map(self, yaml_path):
+        """
+        Load class ID mapping from a YAML configuration file.
+        Updates the internal mapping used for predictions.
+        
+        Args:
+            yaml_path (str or Path): Path to the YAML mapping file
+            
+        Example YAML format:
+            class_id_map:
+              0: 2
+              1: 1
+              2: 0
+        """
+        from src.data.label_converter import load_class_id_map_from_yaml
+        self.class_id_map = load_class_id_map_from_yaml(Path(yaml_path))
+        return self.class_id_map
     
     def get_model_info(self):
         """Get model information"""
         return {
             'model_size': self.model_size,
             'device': self.device,
-            'model': str(self.model)
+            'model': str(self.model),
+            'class_id_map': self.class_id_map
         }

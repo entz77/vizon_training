@@ -1,0 +1,8 @@
+# Class ID mapping configuration for model inference output
+# Maps original predicted class IDs to remapped class IDs for inference results
+# Example: 0: 1 means predicted class ID 0 will be remapped to class ID 1 in inference output
+
+class_id_map:
+  # Add your inference-specific mappings here
+  0: 95
+  1: 101

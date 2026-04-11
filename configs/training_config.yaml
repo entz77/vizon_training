@@ -5,7 +5,7 @@ model_size: 'm'  # Model size: n, s, m, l, x
 
 # Training parameters
 epochs: 100
-batch_size: 24
+batch_size: 8
 imgsz: 640
 patience: 20
 single_cls: false  # Treat all classes as a single class
