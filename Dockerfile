@@ -24,7 +24,9 @@ RUN pip install --no-cache-dir --default-timeout=300 -r requirements.txt
 
 # Copy and install the package
 COPY . .
-RUN pip install --no-cache-dir -e .
+RUN pip install --no-cache-dir .
+
+ENV PYTHONPATH=/app
 
 # Persistent output directories
 RUN mkdir -p logs runs models datasets
