@@ -8,7 +8,6 @@ __pycache__
 .DS_Store
 logs/
 runs/
-*.pt
 *.onnx
 *.npy
 datasets/
