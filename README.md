@@ -47,7 +47,7 @@ vizon_backend/
 1. **Clone the repository**
 ```bash
 git clone <repository-url>
-cd vizon_backend
+cd vizon_training
 ```
 
 2. **Create virtual environment**
