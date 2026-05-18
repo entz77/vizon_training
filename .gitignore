@@ -5,5 +5,5 @@ datasets/
 logs/
 *.cache
 models/
-*.pt
+yolo26l.pt
 runs/
