@@ -8,6 +8,11 @@ import os
 from pathlib import Path
 import yaml
 
+# Guarantee /app is on sys.path regardless of how Vertex AI launches the container
+APP_DIR = Path(__file__).resolve().parent
+if str(APP_DIR) not in sys.path:
+    sys.path.insert(0, str(APP_DIR))
+
 print("PYTHONPATH:", os.environ.get("PYTHONPATH", "NOT SET"))
 print("sys.path:", sys.path)
 print("cwd:", os.getcwd())
