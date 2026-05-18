@@ -22,10 +22,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir --default-timeout=300 -r requirements.txt
 
-# Copy and install the package
 COPY . .
-RUN pip install --no-cache-dir .
-
 ENV PYTHONPATH=/app
 
 # Persistent output directories
