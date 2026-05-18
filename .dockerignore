@@ -14,4 +14,4 @@ runs/
 datasets/
 *.ipynb
 vertex_results/
-models/
+/models/
