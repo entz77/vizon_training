@@ -23,12 +23,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --default-timeout=300 -r requirements.txt
 
 COPY . .
+# Explicitly re-copy src/ to guarantee it lands in the image
+# regardless of any .dockerignore pattern matching behaviour
+COPY src/ /app/src/
 ENV PYTHONPATH=/app
 
-# Show exactly what landed in /app/src to diagnose missing subpackages
 RUN find /app/src -type f | sort
-
-# Verify src package is importable at build time
 RUN python -c "import src.models; print('src.models OK:', src.models.__file__)"
 
 # Persistent output directories
