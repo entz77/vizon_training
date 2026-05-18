@@ -13,6 +13,5 @@ runs/
 *.npy
 datasets/
 *.ipynb
-*.md
 vertex_results/
 models/
