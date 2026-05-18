@@ -10,7 +10,7 @@ from datetime import datetime
 import torch
 import yaml
 
-from ..models import YOLOModel
+from src.models import YOLOModel
 
 
 class YOLOTrainer:
