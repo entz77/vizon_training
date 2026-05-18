@@ -3,8 +3,14 @@ Main training script for YOLO object detection
 """
 
 import argparse
+import sys
+import os
 from pathlib import Path
 import yaml
+
+print("PYTHONPATH:", os.environ.get("PYTHONPATH", "NOT SET"))
+print("sys.path:", sys.path)
+print("cwd:", os.getcwd())
 
 from src.training import YOLOTrainer
 from utils import setup_seed, get_device

@@ -25,6 +25,9 @@ RUN pip install --no-cache-dir --default-timeout=300 -r requirements.txt
 COPY . .
 ENV PYTHONPATH=/app
 
+# Verify src package is importable at build time
+RUN python -c "import src.models; print('src.models OK:', src.models.__file__)"
+
 # Persistent output directories
 RUN mkdir -p logs runs models datasets
 
