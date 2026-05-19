@@ -4,18 +4,13 @@ Main training script for YOLO object detection
 
 import argparse
 import sys
-import os
 from pathlib import Path
 import yaml
 
-# Guarantee /app is on sys.path regardless of how Vertex AI launches the container
+# Guarantee the app directory is on sys.path regardless of how the container is launched
 APP_DIR = Path(__file__).resolve().parent
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
-
-print("PYTHONPATH:", os.environ.get("PYTHONPATH", "NOT SET"))
-print("sys.path:", sys.path)
-print("cwd:", os.getcwd())
 
 from src.training import YOLOTrainer
 from utils import setup_seed, get_device
