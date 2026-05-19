@@ -7,7 +7,6 @@ import json
 import logging
 from pathlib import Path
 from datetime import datetime
-import torch
 import yaml
 
 from src.models import YOLOModel

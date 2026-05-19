@@ -9,6 +9,7 @@ __pycache__
 logs/
 runs/
 *.onnx
+*.pt
 *.npy
 datasets/
 *.ipynb
