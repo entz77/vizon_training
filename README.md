@@ -221,6 +221,61 @@ results = convert_folder_class_id_by_map(
 )
 ```
 
+#### Split Dataset into Train/Val/Test
+
+Split a flat folder of image+label pairs into train/val (and optionally test) subsets.
+Labels are automatically converted from `class_id x y w h r` → `class_id x y w h` during the copy.
+
+**CLI:**
+```bash
+# Train/val split (80/20)
+python src/data/preprocessing.py \
+    --source-dir datasets/raw \
+    --output-dir datasets/split
+
+# Train/val/test split (70/20/10)
+python src/data/preprocessing.py \
+    --source-dir datasets/raw \
+    --output-dir datasets/split \
+    --train-pct 0.7 \
+    --val-pct 0.2 \
+    --test-pct 0.1
+
+# Custom seed
+python src/data/preprocessing.py \
+    --source-dir datasets/raw \
+    --output-dir datasets/split \
+    --train-pct 0.8 \
+    --val-pct 0.2 \
+    --seed 123
+```
+
+**Output structure:**
+```
+datasets/split/
+├── images/
+│   ├── train/
+│   ├── val/
+│   └── test/      ← only when --test-pct > 0
+└── labels/
+    ├── train/
+    ├── val/
+    └── test/      ← only when --test-pct > 0
+```
+
+**Python API:**
+```python
+from src.data.preprocessing import split_dataset
+
+split_dataset(
+    source_dir="datasets/raw",
+    output_dir="datasets/split",
+    train_pct=0.7,
+    val_pct=0.2,
+    test_pct=0.1,
+)
+```
+
 #### Crop Bounding Boxes from Images
 Extract and save individual bounding boxes from images organized by class (useful for creating focused datasets or data augmentation):
 
