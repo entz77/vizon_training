@@ -4,6 +4,6 @@ datasets/
 *__pycache__*
 logs/
 *.cache
-models/
-yolo26l.pt
+/models/
+*.pt
 runs/
