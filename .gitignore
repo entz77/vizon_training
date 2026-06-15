@@ -1,6 +1,6 @@
 .idea
 .DS_Store
-datasets/
+datasets/*/
 *__pycache__*
 logs/
 *.cache
