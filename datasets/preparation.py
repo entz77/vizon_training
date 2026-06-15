@@ -4,7 +4,9 @@ import os
 import random
 from google.cloud import storage
 
-def split_data(gcs_annotation_folder, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, random_seed=42, gcs_default_path='gs://dev-vveesee-ml-training/vizon-training/manual_annotations/detector/'):
+gcs_default_path='gs://dev-vveesee-ml-training/vizon-training/manual_annotations/detector/'
+
+def split_data(gcs_annotation_folder, train_ratio=0.8, val_ratio=0.1, test_ratio=0.1, random_seed=42):
     """
     1. List all annotation files in the local folder.
     2. Shuffle the list of files using the provided random seed.
@@ -21,7 +23,7 @@ def split_data(gcs_annotation_folder, train_ratio=0.8, val_ratio=0.1, test_ratio
     """
 
     # List all annotation files in a gcs folder
-    full_path = gcs_default_path.rstrip('/') + '/' + gcs_annotation_folder.strip('/')
+    full_path = gcs_default_path.rstrip('/') + '/' + gcs_annotation_folder.strip('/')+'/labels'
     print(full_path)
     client = storage.Client()
     bucket_name = full_path.split('/')[2]
@@ -67,7 +69,7 @@ def summarize_data(train_files, val_files, test_files, gcs_destination_folder):
             image_dest = os.path.join(dest_base_path, gcs_destination_folder, 'images', split_name, os.path.basename(image_file_name))
             data.append((file, annotation_dest))
             data.append((image_file_name, image_dest))
-            cls_data[image_file_name] = file
+            cls_data[image_dest] = annotation_dest
 
     return data, cls_data
 
@@ -93,15 +95,14 @@ def copy_data_in_gcs(data):
         source_bucket.copy_blob(source_blob, destination_bucket, new_name=destination_blob_name)
         print(f'Successful copy to {destination}')
 
-def dump_data_map(data_map):
+def dump_data_map(data_map, annotation_folder):
     """
     From cls_data dictionary, dump it to as JSON file in the same folder of the first element's value in the dict
     """
-    first_value = next(iter(data_map.values()))
-    base_folder = '/'.join(first_value.split('/')[:-2])
 
-    bucket_name = base_folder.split('/')[2]
-    blob_name = '/'.join(base_folder.split('/')[3:]) + '/det_data_map.json'
+    bucket_name = gcs_default_path.split('/')[2]
+    blob_name = '/'.join(gcs_default_path.split('/')[3:]) + f'{annotation_folder}/det_data_map.json'
+    print(blob_name)
 
     client = storage.Client()
     bucket = client.bucket(bucket_name)
