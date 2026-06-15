@@ -1,0 +1,15 @@
+import argparse
+from datasets import preparation
+
+parser = argparse.ArgumentParser()
+parser.add_argument('--train-ratio', type=float, default=0.7)
+parser.add_argument('--val-ratio', type=float, default=0.3)
+parser.add_argument('--test-ratio', type=float, default=0.0)
+parser.add_argument('--random-seed', type=int, default=42)
+parser.add_argument('--gcs-annotation-folder', type=str, required=True)
+parser.add_argument('--gcs-destination-folder', type=str, required=True)
+args = parser.parse_args()
+
+split_files = preparation.split_data(args.gcs_annotation_folder, args.train_ratio, args.val_ratio, args.test_ratio, args.random_seed)
+data = preparation.summarize_data(*split_files, args.gcs_destination_folder)
+preparation.copy_data_in_gcs(data)
