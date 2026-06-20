@@ -59,7 +59,7 @@ def summarize_data(train_files, val_files, test_files, gcs_destination_folder):
     """
     data = []
     cls_data = {}
-    image_src_base_path = 'gs://dev-vveesee-edge-submit/images/'
+    image_src_base_path = 'gs://prd-vveesee-edge-submit/images/'
     dest_base_path = 'gs://dev-vveesee-ml-training/vizon-training/datasets/'
     for split_name, split_files in [('train', train_files), ('val', val_files), ('test', test_files)]:
         for file in split_files:
