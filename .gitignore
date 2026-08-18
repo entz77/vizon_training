@@ -7,3 +7,4 @@ logs/
 /models/
 *.pt
 runs/
+.venv

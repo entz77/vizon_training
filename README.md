@@ -268,46 +268,49 @@ results = convert_folder_class_id_by_map(
 )
 ```
 
-#### Split Dataset into Train/Val/Test
+## Split Dataset into Train/Val/Test
 
-Split a flat folder of image+label pairs into train/val (and optionally test) subsets.
-Labels are automatically converted from `class_id x y w h r` → `class_id x y w h` during the copy.
+Split a GCS folder of `.txt` labels into train/val (and optionally test) subsets, fetching each
+label's matching image (by file stem) from a GCS images folder — default
+`gs://prd-vveesee-edge-submit/images`. Labels are automatically converted from
+`class_id x y w h r` → `class_id x y w h` during the copy. Both labels and images are read and
+written directly to/from GCS; nothing is downloaded locally.
 
 **CLI:**
 ```bash
 # Train/val split (80/20)
 python src/data/preprocessing.py \
-    --source-dir datasets/raw \
-    --output-dir datasets/split
+    --source-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7/labels \
+    --output-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7_split
 
 # Train/val/test split (70/20/10)
 python src/data/preprocessing.py \
-    --source-dir datasets/raw \
-    --output-dir datasets/split \
+    --source-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7/labels \
+    --output-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7_split \
     --train-pct 0.7 \
     --val-pct 0.2 \
     --test-pct 0.1
 
-# Custom seed
+# Custom images source and seed
 python src/data/preprocessing.py \
-    --source-dir datasets/raw \
-    --output-dir datasets/split \
+    --source-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7/labels \
+    --output-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7_split \
+    --images-base-path gs://dev-vveesee-edge-submit/images \
     --train-pct 0.8 \
     --val-pct 0.2 \
     --seed 123
 ```
 
-**Output structure:**
+**Output structure (under `--output-dir`):**
 ```
-datasets/split/
-├── images/
-│   ├── train/
-│   ├── val/
-│   └── test/      ← only when --test-pct > 0
-└── labels/
-    ├── train/
-    ├── val/
-    └── test/      ← only when --test-pct > 0
+images/
+├── train/
+├── val/
+└── test/      ← only when --test-pct > 0
+labels/
+├── train/
+├── val/
+└── test/      ← only when --test-pct > 0
 ```
 
 **Python API:**
@@ -315,8 +318,8 @@ datasets/split/
 from src.data.preprocessing import split_dataset
 
 split_dataset(
-    source_dir="datasets/raw",
-    output_dir="datasets/split",
+    source_dir="gs://dev-vveesee-ml-training/vizon-training/manual_annotations/detector/my_task/labels",
+    output_dir="gs://dev-vveesee-ml-training/vizon-training/datasets/my_dataset",
     train_pct=0.7,
     val_pct=0.2,
     test_pct=0.1,
