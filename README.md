@@ -84,6 +84,53 @@ Each image in `labels/` should have a corresponding `.txt` file with annotations
 ```
 (All coordinates normalized to [0, 1])
 
+#### Build a GCS Dataset from Label Studio Annotations (`prepare_dataset.py`)
+
+If your detector annotations come from Label Studio and live in GCS (rather than
+a local flat folder), use `prepare_dataset.py` to turn an annotation export into
+a versioned train/val/test dataset folder in GCS:
+
+1. Lists the `.txt` label files under
+   `gs://dev-vveesee-ml-training/vizon-training/manual_annotations/detector/<gcs-annotation-folder>/labels/`. --> Currently the files are uploaded manually to the folder
+2. Shuffles them with `--random-seed` and splits into train/val/(test) using
+   `--train-ratio` / `--val-ratio` / `--test-ratio`. If `--test-ratio` is `0`
+   (the default), every non-train file goes to validation.
+3. Matches each label file to its source image (same basename, `.jpg`) under
+   `gs://prd-vveesee-edge-submit/images/`.
+4. Copies each image/label pair into
+   `gs://dev-vveesee-ml-training/vizon-training/datasets/<gcs-destination-folder>/{images,labels}/{train,val,test}/`.
+5. Writes a `det_data_map.json` (destination image blob → destination label blob)
+   back into the annotation folder, for downstream classification labelling.
+
+**Prerequisites:**
+- `google-cloud-storage` (included in `requirements.txt`).
+- GCP credentials with read access to the annotation/image source buckets and
+  write access to the destination bucket, e.g. `gcloud auth application-default login`.
+
+**CLI:**
+```bash
+python prepare_dataset.py \
+    --gcs-annotation-folder rtd_batch1 \
+    --gcs-destination-folder rtd \
+    --train-ratio 0.7 \
+    --val-ratio 0.3 \
+    --test-ratio 0.0 \
+    --random-seed 42
+```
+
+| Argument | Required | Default | Description |
+|---|---|---|---|
+| `--gcs-annotation-folder` | Yes | — | Subfolder under `manual_annotations/detector/` for this Label Studio export (must contain a `labels/` subfolder of `.txt` files); unique per Label Studio task. |
+| `--gcs-destination-folder` | Yes | — | Subfolder under `datasets/` to create/populate, e.g. `rtd`. |
+| `--train-ratio` | No | `0.7` | Fraction of files used for training. |
+| `--val-ratio` | No | `0.3` | Fraction of files used for validation (ignored when `--test-ratio` is `0`; the remainder after train all goes to val). |
+| `--test-ratio` | No | `0.0` | Fraction of files held out for testing. |
+| `--random-seed` | No | `42` | Seed used to shuffle files before splitting, for reproducible splits. |
+
+Once copied, pull the destination dataset folder down locally (e.g. with `gsutil
+-m rsync -r gs://dev-vveesee-ml-training/vizon-training/datasets/<gcs-destination-folder> datasets/<name>`)
+to get the standard YOLO `images/`/`labels/` layout described above.
+
 ### 2. Label Conversion Utilities
 
 The framework provides utilities to convert between different label formats:
