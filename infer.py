@@ -3,13 +3,50 @@ Inference script for YOLO object detection
 """
 
 import argparse
+import json
 import sys
+import tempfile
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.models import YOLOModel
 from src.inference import YOLOPredictor
+
+
+def download_gcs_images(gcs_uris, dest_dir):
+    """
+    Download a list of gs:// image URIs into dest_dir. URIs that don't exist in GCS
+    are skipped with a warning rather than aborting the whole batch.
+
+    Returns:
+        list[tuple[str, str]]: (gcs_uri, local_path) pairs for successfully downloaded images
+    """
+    from google.api_core.exceptions import NotFound
+    from google.cloud import storage
+
+    client = storage.Client()
+    downloaded = []
+    total = len(gcs_uris)
+
+    for i, uri in enumerate(gcs_uris, start=1):
+        bucket_name = uri.split('/')[2]
+        blob_name = '/'.join(uri.split('/')[3:])
+        local_path = Path(dest_dir) / f"{len(downloaded):06d}_{Path(blob_name).name}"
+
+        print(f"  [{i}/{total}] downloading {uri}")
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_name)
+        try:
+            blob.download_to_filename(str(local_path))
+        except NotFound:
+            print(f"  [{i}/{total}] skip (not found in GCS): {uri}")
+            local_path.unlink(missing_ok=True)
+            continue
+
+        downloaded.append((uri, str(local_path)))
+
+    return downloaded
 
 
 def main(args):
@@ -57,6 +94,35 @@ def main(args):
         if args.output:
             print(f"Output saved to: {args.output}")
     
+    elif args.mode == 'gcs_images':
+        with open(args.source, 'r') as f:
+            gcs_uris = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+
+        print(f"Downloading {len(gcs_uris)} image(s) from GCS")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            downloaded = download_gcs_images(gcs_uris, tmp_dir)
+            local_paths = [local_path for _, local_path in downloaded]
+
+            skipped = len(gcs_uris) - len(downloaded)
+            if skipped:
+                print(f"Skipped {skipped} missing image(s)")
+
+            print(f"Predicting on {len(local_paths)} image(s)")
+            output_records = []
+            total = len(local_paths)
+            for i, (gcs_uri, local_path) in enumerate(downloaded, start=1):
+                print(f"  [{i}/{total}] predicting {gcs_uri}")
+                results = predictor.predict_image(local_path)
+                print(f"  [{i}/{total}] {len(results['detections'])} detection(s)")
+                for det in results['detections']:
+                    print(f"    - Class ID: {det['class_id']}, {det['class_name']}, Confidence: {det['confidence']:.2f}")
+                output_records.append({'gcs_uri': gcs_uri, **results})
+
+        output_path = args.output or 'results.json'
+        with open(output_path, 'w') as f:
+            json.dump(output_records, f, indent=2)
+        print(f"Results written to: {output_path}")
+
     elif args.mode == 'webcam':
         print(f"Starting webcam inference for {args.duration} seconds")
         results = predictor.predict_webcam(
@@ -88,13 +154,13 @@ if __name__ == '__main__':
         '--source',
         type=str,
         required=True,
-        help='Source: image/video path or directory'
+        help='Source: image/video path or directory. For --mode gcs_images, a local text file listing gs:// image URIs, one per line'
     )
     parser.add_argument(
         '--mode',
         type=str,
         default='image',
-        choices=['image', 'video', 'webcam'],
+        choices=['image', 'video', 'webcam', 'gcs_images'],
         help='Inference mode'
     )
     parser.add_argument(

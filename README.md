@@ -465,6 +465,20 @@ python infer.py \
     --output webcam_output.mp4
 ```
 
+**On a list of images in GCS:**
+
+Create a text file listing one `gs://` image URI per line, then run:
+```bash
+python infer.py \
+    --weights runs/detect/train/weights/best.pt \
+    --source images.txt \
+    --mode gcs_images \
+    --output results.json
+```
+Each image is downloaded to a temp directory (cleaned up afterward), predicted on, and the
+detections are written to `results.json` keyed by `gcs_uri`. Uses your default GCS credentials
+(e.g. `gcloud auth application-default login`).
+
 ### 6. Evaluate Model
 
 ```bash
