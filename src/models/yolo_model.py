@@ -103,30 +103,32 @@ class YOLOModel:
         
         return results
     
-    def predict(self, source, conf=0.25, iou=0.45, imgsz=640, device=None):
+    def predict(self, source, conf=0.25, iou=0.45, imgsz=640, device=None, verbose=True):
         """
         Run inference on images or video.
-        
+
         Args:
             source (str): Path to image/video or PIL Image
             conf (float): Confidence threshold
             iou (float): IOU threshold for NMS
             imgsz (int): Input image size
             device (str): Device to use
-        
+            verbose (bool): Print per-image inference logs
+
         Returns:
             list: Prediction results
         """
         device = device or self.device
-        
+
         results = self.model.predict(
             source=source,
             conf=conf,
             iou=iou,
             imgsz=imgsz,
-            device=device
+            device=device,
+            verbose=verbose
         )
-        
+
         return results
     
     def export(self, format='onnx', half=False):

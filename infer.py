@@ -8,6 +8,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+from tqdm import tqdm
+
 sys.path.insert(0, str(Path(__file__).parent))
 
 from src.models import YOLOModel
@@ -27,24 +29,26 @@ def download_gcs_images(gcs_uris, dest_dir):
 
     client = storage.Client()
     downloaded = []
-    total = len(gcs_uris)
+    skipped = 0
 
-    for i, uri in enumerate(gcs_uris, start=1):
+    for uri in tqdm(gcs_uris, desc="Downloading", unit="img"):
         bucket_name = uri.split('/')[2]
         blob_name = '/'.join(uri.split('/')[3:])
         local_path = Path(dest_dir) / f"{len(downloaded):06d}_{Path(blob_name).name}"
 
-        print(f"  [{i}/{total}] downloading {uri}")
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(blob_name)
         try:
             blob.download_to_filename(str(local_path))
         except NotFound:
-            print(f"  [{i}/{total}] skip (not found in GCS): {uri}")
+            skipped += 1
             local_path.unlink(missing_ok=True)
             continue
 
         downloaded.append((uri, str(local_path)))
+
+    if skipped:
+        print(f"Skipped {skipped} image(s) not found in GCS")
 
     return downloaded
 
@@ -101,24 +105,14 @@ def main(args):
         print(f"Downloading {len(gcs_uris)} image(s) from GCS")
         with tempfile.TemporaryDirectory() as tmp_dir:
             downloaded = download_gcs_images(gcs_uris, tmp_dir)
-            local_paths = [local_path for _, local_path in downloaded]
 
-            skipped = len(gcs_uris) - len(downloaded)
-            if skipped:
-                print(f"Skipped {skipped} missing image(s)")
-
-            print(f"Predicting on {len(local_paths)} image(s)")
             output_records = []
-            total = len(local_paths)
-            for i, (gcs_uri, local_path) in enumerate(downloaded, start=1):
-                print(f"  [{i}/{total}] predicting {gcs_uri}")
-                results = predictor.predict_image(local_path)
-                print(f"  [{i}/{total}] {len(results['detections'])} detection(s)")
-                for det in results['detections']:
-                    print(f"    - Class ID: {det['class_id']}, {det['class_name']}, Confidence: {det['confidence']:.2f}")
+            for gcs_uri, local_path in tqdm(downloaded, desc="Predicting", unit="img"):
+                results = predictor.predict_image(local_path, verbose=False)
                 output_records.append({'gcs_uri': gcs_uri, **results})
 
-        output_path = args.output or 'results.json'
+        source_path = Path(args.source)
+        output_path = args.output or (source_path.parent / f"{source_path.stem}_results.json")
         with open(output_path, 'w') as f:
             json.dump(output_records, f, indent=2)
         print(f"Results written to: {output_path}")

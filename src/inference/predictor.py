@@ -32,22 +32,24 @@ class YOLOPredictor:
         # Use provided mapping or fall back to model's mapping
         self.class_id_map = class_id_map if class_id_map is not None else getattr(model, 'class_id_map', None)
     
-    def predict_image(self, image_path: str):
+    def predict_image(self, image_path: str, verbose: bool = True):
         """
         Predict on single image.
-        
+
         Args:
             image_path (str): Path to image file
-        
+            verbose (bool): Print per-image inference logs
+
         Returns:
             dict: Predictions with boxes, classes, and confidences
         """
         results = self.model.predict(
             source=image_path,
             conf=self.conf_threshold,
-            iou=self.iou_threshold
+            iou=self.iou_threshold,
+            verbose=verbose
         )
-        
+
         return self._format_results(results[0])
     
     def predict_batch(self, image_paths: List[str]):
