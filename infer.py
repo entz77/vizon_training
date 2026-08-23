@@ -5,7 +5,6 @@ Inference script for YOLO object detection
 import argparse
 import json
 import sys
-import tempfile
 from pathlib import Path
 
 from tqdm import tqdm
@@ -15,26 +14,44 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.models import YOLOModel
 from src.inference import YOLOPredictor
 
+# Shared (not per-run, not per-repo) cache directory that GCS-sourced images are downloaded
+# into - lives outside this repo, at a fixed absolute path, so it's reachable from
+# vizon_classifier_embedding's labelstudio_inference_pipeline.py / lensabonus_inference_pipeline.py
+# too (see inference_common.DEFAULT_IMAGES_CACHE_DIR there). All of them preserve the GCS blob's
+# own filename locally, so whichever script downloads an image first, the others can reuse it.
+DEFAULT_IMAGES_CACHE_DIR = "/home/enitze/projects/repos/vizon/shared_image_folder"
+
 
 def download_gcs_images(gcs_uris, dest_dir):
     """
-    Download a list of gs:// image URIs into dest_dir. URIs that don't exist in GCS
+    Download a list of gs:// image URIs into dest_dir, skipping any URI whose blob filename
+    is already present there (see DEFAULT_IMAGES_CACHE_DIR). URIs that don't exist in GCS
     are skipped with a warning rather than aborting the whole batch.
 
     Returns:
-        list[tuple[str, str]]: (gcs_uri, local_path) pairs for successfully downloaded images
+        list[tuple[str, str]]: (gcs_uri, local_path) pairs for successfully downloaded
+        or already-cached images
     """
     from google.api_core.exceptions import NotFound
     from google.cloud import storage
 
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+
     client = storage.Client()
     downloaded = []
+    cached = 0
     skipped = 0
 
     for uri in tqdm(gcs_uris, desc="Downloading", unit="img"):
         bucket_name = uri.split('/')[2]
         blob_name = '/'.join(uri.split('/')[3:])
-        local_path = Path(dest_dir) / f"{len(downloaded):06d}_{Path(blob_name).name}"
+        local_path = dest_dir / Path(blob_name).name
+
+        if local_path.exists():
+            cached += 1
+            downloaded.append((uri, str(local_path)))
+            continue
 
         bucket = client.bucket(bucket_name)
         blob = bucket.blob(blob_name)
@@ -47,6 +64,8 @@ def download_gcs_images(gcs_uris, dest_dir):
 
         downloaded.append((uri, str(local_path)))
 
+    if cached:
+        print(f"Reused {cached} already-cached image(s) from {dest_dir}")
     if skipped:
         print(f"Skipped {skipped} image(s) not found in GCS")
 
@@ -102,14 +121,13 @@ def main(args):
         with open(args.source, 'r') as f:
             gcs_uris = [line.strip() for line in f if line.strip() and not line.startswith('#')]
 
-        print(f"Downloading {len(gcs_uris)} image(s) from GCS")
-        with tempfile.TemporaryDirectory() as tmp_dir:
-            downloaded = download_gcs_images(gcs_uris, tmp_dir)
+        print(f"Downloading {len(gcs_uris)} image(s) from GCS (cache: {args.images_cache_dir})")
+        downloaded = download_gcs_images(gcs_uris, args.images_cache_dir)
 
-            output_records = []
-            for gcs_uri, local_path in tqdm(downloaded, desc="Predicting", unit="img"):
-                results = predictor.predict_image(local_path, verbose=False)
-                output_records.append({'gcs_uri': gcs_uri, **results})
+        output_records = []
+        for gcs_uri, local_path in tqdm(downloaded, desc="Predicting", unit="img"):
+            results = predictor.predict_image(local_path, verbose=False)
+            output_records.append({'gcs_uri': gcs_uri, **results})
 
         source_path = Path(args.source)
         output_path = args.output or (source_path.parent / f"{source_path.stem}_results.json")
@@ -200,6 +218,14 @@ if __name__ == '__main__':
         default=None,
         help='Path to YAML file with class ID mapping (e.g., configs/convert_class_id_map.yaml)'
     )
-    
+    parser.add_argument(
+        '--images-cache-dir',
+        type=str,
+        default=DEFAULT_IMAGES_CACHE_DIR,
+        help='For --mode gcs_images: shared directory downloaded images are cached in - an '
+             'image already there is reused instead of re-downloaded '
+             f'(default: {DEFAULT_IMAGES_CACHE_DIR})'
+    )
+
     args = parser.parse_args()
     main(args)

@@ -392,10 +392,13 @@ python infer.py \
     --mode gcs_images \
     --output results.json
 ```
-Each image is downloaded to a temp directory (cleaned up afterward), predicted on, and the
-detections are written to the output JSON keyed by `gcs_uri`. If `--output` is omitted, results
-are written to `<images-file-stem>_results.json` next to `images.txt`. Uses your default GCS
-credentials (`gcloud auth application-default login`).
+Each image is downloaded into a shared local cache (`--images-cache-dir`, default
+`/home/enitze/projects/repos/vizon/shared_image_folder` — outside this repo, so it's shared
+across runs and reused by `vizon_classifier_embedding`'s inference pipelines too) before being
+predicted on; an image already present there (matched by the GCS blob's own filename) is reused
+instead of re-downloaded. Detections are written to the output JSON keyed by `gcs_uri`. If
+`--output` is omitted, results are written to `<images-file-stem>_results.json` next to
+`images.txt`. Uses your default GCS credentials (`gcloud auth application-default login`).
 
 ### 7. Remap Class IDs at Inference Time
 
