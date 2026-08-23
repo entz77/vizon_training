@@ -1,113 +1,127 @@
 # Vizon - YOLO Object Detection Training Framework
 
-A comprehensive Python framework for training, evaluating, and deploying Ultralytics YOLOv8 models for object detection.
+A Python framework for preparing datasets, training, evaluating, and running inference with
+Ultralytics YOLOv8 object detection models — including tooling to pull annotations and images
+directly from GCS.
 
-## Features
+## Table of Contents
 
-- **Easy-to-use training pipeline** with configurable hyperparameters
-- **Data loading utilities** supporting YOLO format annotations
-- **Model management** with support for different YOLOv8 sizes (n, s, m, l, x)
-- **Inference capabilities** on images, videos, and webcam feeds
-- **Evaluation metrics** including precision, recall, and mAP
-- **Modular architecture** for easy customization and extension
+1. [Project Structure](#project-structure)
+2. [Installation](#installation)
+3. [Workflow](#workflow)
+   - [1. Prepare a Dataset](#1-prepare-a-dataset)
+   - [2. Convert / Fix Labels](#2-convert--fix-labels)
+   - [3. Crop Bounding Boxes (optional)](#3-crop-bounding-boxes-optional)
+   - [4. Configure the Dataset](#4-configure-the-dataset)
+   - [5. Train](#5-train)
+   - [6. Run Inference](#6-run-inference)
+   - [7. Remap Class IDs at Inference Time](#7-remap-class-ids-at-inference-time)
+   - [8. Evaluate](#8-evaluate)
+4. [Notebooks](#notebooks)
+5. [Python API Reference](#python-api-reference)
+6. [Configuration Reference](#configuration-reference)
+7. [GPU & Performance](#gpu--performance)
+8. [Troubleshooting](#troubleshooting)
+9. [Development](#development)
+10. [References](#references)
 
 ## Project Structure
 
 ```
-vizon_backend/
+vizon_training/
 ├── src/
-│   ├── data/              # Data loading and preprocessing
-│   │   ├── dataset.py     # Custom YOLO dataset class
-│   │   └── dataloader.py  # DataLoader creation utilities
-│   ├── models/            # Model definitions
-│   │   └── yolo_model.py  # YOLO model wrapper
-│   ├── training/          # Training pipeline
-│   │   └── trainer.py     # Training manager
-│   ├── evaluation/        # Evaluation utilities
-│   │   └── evaluator.py   # Model evaluator
-│   └── inference/         # Inference utilities
-│       └── predictor.py   # Prediction interface
-├── configs/               # Configuration files
-│   ├── training_config.yaml    # Training parameters
-│   └── dataset_config.yaml     # Dataset configuration
-├── utils/                 # Helper functions
-│   └── helpers.py         # Utility functions
-├── datasets/              # Data directory (to be populated)
-├── logs/                  # Training logs
-├── runs/                  # Training outputs
-├── train.py              # Main training script
-├── infer.py              # Inference script
-├── evaluate.py           # Evaluation script
-├── examples.py           # Usage examples
-└── requirements.txt      # Python dependencies
+│   ├── data/                        # Data loading, conversion, GCS dataset prep
+│   │   ├── dataset.py                 # Custom YOLO PyTorch Dataset
+│   │   ├── dataloader.py              # DataLoader creation utilities
+│   │   ├── label_converter.py         # Label format conversion (OBB, xywh, class remap)
+│   │   ├── preprocessing.py            # GCS-native train/val/test split
+│   │   └── bbox_cropper.py             # Crop bounding boxes out of labeled images
+│   ├── models/yolo_model.py         # YOLO model wrapper (train/predict/export)
+│   ├── training/trainer.py          # Training pipeline + logging
+│   ├── evaluation/evaluator.py      # Metrics (precision/recall/F1, IoU)
+│   └── inference/predictor.py       # Unified image/batch/video/webcam inference
+├── configs/
+│   ├── training_config.yaml           # Training hyperparameters
+│   ├── dataset_config.yaml            # Dataset paths + class names
+│   ├── bbox_crop_config.yaml           # Class filter for bbox_cropper.py
+│   └── convert_class_id_map.yaml       # Class ID remap table
+├── utils/helpers.py                 # Seeding, device detection, YAML I/O, GPU info
+├── datasets/                        # Local dataset copies (populated by you)
+├── logs/                            # Training logs
+├── runs/                            # Training/inference outputs
+├── train.py                         # Training entry point
+├── infer.py                         # Inference entry point (image/video/webcam/GCS)
+├── evaluate.py                      # Evaluation entry point
+├── prepare_dataset.py               # Label Studio (GCS) → versioned GCS dataset
+├── convert_xywhr_to_xywh.py         # CLI wrapper for rotated → axis-aligned boxes
+├── convert_class_id_to_zero.py      # CLI wrapper to collapse all classes to id 0
+├── convert_class_id_by_map.py       # CLI wrapper for custom class ID remapping
+├── embed_class_mapping_in_model.py  # Bake a class ID remap into a model's names
+├── validate_config.py               # Sanity-check training/dataset config YAMLs
+├── examples.py                      # Runnable usage examples for the Python API
+├── YOLO_Training_Notebook.ipynb     # Local/interactive training walkthrough
+├── VertexAI_Training_Notebook.ipynb # Submit training as a Vertex AI custom job
+├── requirements.txt                 # Runtime dependencies
+└── requirements-dev.txt             # Dev tooling (pytest, black, flake8, isort)
 ```
 
 ## Installation
 
-1. **Clone the repository**
 ```bash
 git clone <repository-url>
 cd vizon_training
-```
 
-2. **Create virtual environment**
-```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
+source venv/bin/activate   # Windows: venv\Scripts\activate
 
-3. **Install dependencies**
-```bash
 pip install -r requirements.txt
 ```
 
-## Quick Start
-
-### 1. Prepare Your Dataset
-
-Organize your dataset in YOLO format:
-```
-datasets/
-├── images/
-│   ├── train/
-│   ├── val/
-│   └── test/
-└── labels/
-    ├── train/
-    ├── val/
-    └── test/
+For development (tests/formatting/linting):
+```bash
+pip install -r requirements-dev.txt
 ```
 
-Each image in `labels/` should have a corresponding `.txt` file with annotations in YOLO format:
+Verify the install:
+```bash
+python -c "from src.models import YOLOModel; print('Installation successful!')"
 ```
-<class_id> <x_center> <y_center> <width> <height>
+
+Most GCS-backed commands below (`prepare_dataset.py`, `preprocessing.py`, `infer.py --mode
+gcs_images`) need GCP credentials with access to the relevant buckets:
+```bash
+gcloud auth application-default login
 ```
-(All coordinates normalized to [0, 1])
 
-#### Build a GCS Dataset from Label Studio Annotations (`prepare_dataset.py`)
+## Workflow
 
-If your detector annotations come from Label Studio and live in GCS (rather than
-a local flat folder), use `prepare_dataset.py` to turn an annotation export into
-a versioned train/val/test dataset folder in GCS:
+### 1. Prepare a Dataset
 
-1. Lists the `.txt` label files under
-   `gs://dev-vveesee-ml-training/vizon-training/manual_annotations/detector/<gcs-annotation-folder>/labels/`. --> Currently the files are uploaded manually to the folder
-2. Shuffles them with `--random-seed` and splits into train/val/(test) using
-   `--train-ratio` / `--val-ratio` / `--test-ratio`. If `--test-ratio` is `0`
-   (the default), every non-train file goes to validation.
-3. Matches each label file to its source image (same basename, `.jpg`) under
+**Target layout.** Whatever path you take below, you should end up with the standard YOLO
+layout under `datasets/<name>/`:
+```
+datasets/my_dataset/
+├── images/{train,val,test}/
+└── labels/{train,val,test}/       # one .txt per image, same basename
+```
+Each label line is `<class_id> <x_center> <y_center> <width> <height>`, all coordinates
+normalized to `[0, 1]`.
+
+**Option A — From Label Studio annotations in GCS (`prepare_dataset.py`).**
+Turns a Label Studio export into a versioned train/val/(test) dataset folder in GCS:
+
+1. Lists `.txt` label files under
+   `gs://dev-vveesee-ml-training/vizon-training/manual_annotations/detector/<gcs-annotation-folder>/labels/`
+   (currently uploaded there manually).
+2. Shuffles them with `--random-seed` and splits by `--train-ratio` / `--val-ratio` /
+   `--test-ratio`. If `--test-ratio` is `0` (default), every non-train file goes to validation.
+3. Matches each label to its source image (same basename, `.jpg`) under
    `gs://prd-vveesee-edge-submit/images/`.
 4. Copies each image/label pair into
    `gs://dev-vveesee-ml-training/vizon-training/datasets/<gcs-destination-folder>/{images,labels}/{train,val,test}/`.
-5. Writes a `det_data_map.json` (destination image blob → destination label blob)
-   back into the annotation folder, for downstream classification labelling.
+5. Writes `det_data_map.json` (destination image blob → destination label blob) back into the
+   annotation folder, for downstream classification labelling.
 
-**Prerequisites:**
-- `google-cloud-storage` (included in `requirements.txt`).
-- GCP credentials with read access to the annotation/image source buckets and
-  write access to the destination bucket, e.g. `gcloud auth application-default login`.
-
-**CLI:**
 ```bash
 python prepare_dataset.py \
     --gcs-annotation-folder rtd_batch1 \
@@ -123,197 +137,43 @@ python prepare_dataset.py \
 | `--gcs-annotation-folder` | Yes | — | Subfolder under `manual_annotations/detector/` for this Label Studio export (must contain a `labels/` subfolder of `.txt` files); unique per Label Studio task. |
 | `--gcs-destination-folder` | Yes | — | Subfolder under `datasets/` to create/populate, e.g. `rtd`. |
 | `--train-ratio` | No | `0.7` | Fraction of files used for training. |
-| `--val-ratio` | No | `0.3` | Fraction of files used for validation (ignored when `--test-ratio` is `0`; the remainder after train all goes to val). |
-| `--test-ratio` | No | `0.0` | Fraction of files held out for testing. |
-| `--random-seed` | No | `42` | Seed used to shuffle files before splitting, for reproducible splits. |
+| `--val-ratio` | No | `0.3` | Fraction used for validation (ignored when `--test-ratio` is `0`; the remainder after train all goes to val). |
+| `--test-ratio` | No | `0.0` | Fraction held out for testing. |
+| `--random-seed` | No | `42` | Shuffle seed, for reproducible splits. |
 
-Once copied, pull the destination dataset folder down locally (e.g. with `gsutil
--m rsync -r gs://dev-vveesee-ml-training/vizon-training/datasets/<gcs-destination-folder> datasets/<name>`)
-to get the standard YOLO `images/`/`labels/` layout described above.
-
-### 2. Label Conversion Utilities
-
-The framework provides utilities to convert between different label formats:
-
-#### Convert XYWHR to OBB Format (Rotated Bboxes)
-Convert from `class_id x y w h r` (rotated bounding box) to YOLO OBB format:
-
-**CLI:**
+Then pull the result down locally:
 ```bash
-python -c "from src.data.label_converter import convert_folder_xywhr_to_obb; \
-convert_folder_xywhr_to_obb('input_labels', 'output_labels')"
+gsutil -m rsync -r gs://dev-vveesee-ml-training/vizon-training/datasets/<gcs-destination-folder> datasets/<name>
 ```
 
-**Python API:**
-```python
-from src.data.label_converter import convert_folder_xywhr_to_obb, convert_file_xywhr_to_obb
+**Option B — Split an existing GCS labels folder (`src/data/preprocessing.py`).**
+Use this when you already have a flat folder of labels in GCS (not a Label Studio export) and
+just need a train/val/test split. It fetches each label's matching image (by file stem) from a
+GCS images folder — default `gs://prd-vveesee-edge-submit/images` — and converts labels from
+`class_id x y w h r` → `class_id x y w h` during the copy. Everything is read/written directly
+to/from GCS; nothing is downloaded locally.
 
-# Convert entire folder
-results = convert_folder_xywhr_to_obb(
-    input_dir='datasets/labels_rotated',
-    output_dir='datasets/labels_obb',
-    angle_unit='radians',  # or 'degrees'
-    precision=6
-)
-
-# Convert single file
-convert_file_xywhr_to_obb(
-    input_path='labels/image1.txt',
-    output_path='labels_obb/image1.txt'
-)
-```
-
-#### Convert XYWHR to Standard YOLO XYWH Format
-Convert from `class_id x y w h r` to standard YOLO `class_id x y w h` format:
-
-**CLI:**
-```bash
-python convert_xywhr_to_xywh.py --input-dir datasets/labels_rotated --output-dir datasets/labels
-python convert_xywhr_to_xywh.py --input-dir in_labels --output-dir out_labels --precision 6
-```
-
-**Python API:**
-```python
-from src.data.label_converter import convert_folder_xywhr_to_xywh, convert_file_xywhr_to_xywh
-
-# Convert entire folder
-results = convert_folder_xywhr_to_xywh(
-    input_dir='datasets/labels_rotated',
-    output_dir='datasets/labels',
-    precision=6
-)
-
-# Convert single file
-convert_file_xywhr_to_xywh(
-    input_path='labels/image1.txt',
-    output_path='labels/image1_converted.txt',
-    precision=6
-)
-```
-
-#### Convert Class IDs to 0
-Convert all class IDs in label files to 0 (useful for single-class models or data preparation):
-
-**CLI:**
-```bash
-python convert_class_id_to_zero.py --input-dir datasets/labels
-python convert_class_id_to_zero.py --input-dir in_labels --output-dir out_labels
-```
-
-**Python API:**
-```python
-from src.data.label_converter import convert_folder_class_id_to_zero, convert_file_class_id_to_zero
-
-# Convert entire folder (in-place)
-results = convert_folder_class_id_to_zero(
-    input_dir='datasets/labels'
-)
-
-# Convert with output directory
-results = convert_folder_class_id_to_zero(
-    input_dir='datasets/labels',
-    output_dir='datasets/labels_zero_class'
-)
-
-# Convert single file
-convert_file_class_id_to_zero(
-    input_path='labels/image1.txt',
-    output_path='labels/image1_zero_class.txt'
-)
-```
-
-#### Convert Class IDs Using Custom Mapping
-Convert class IDs in label files using a custom mapping defined in a YAML configuration file (useful for remapping class indices or consolidating multiple classes):
-
-**Setup mapping configuration** (`configs/convert_class_id_map.yaml`):
-```yaml
-class_id_map:
-  95: 0    # Map original class ID 95 to 0
-  101: 1   # Map original class ID 101 to 1
-  # Add more mappings as needed
-```
-
-**CLI:**
-```bash
-python convert_class_id_by_map.py --input-dir datasets/labels --map-config configs/convert_class_id_map.yaml
-python convert_class_id_by_map.py --input-dir in_labels --output-dir out_labels --map-config configs/convert_class_id_map.yaml
-```
-
-**Python API:**
-```python
-from src.data.label_converter import convert_folder_class_id_by_map, load_class_id_map_from_yaml
-from pathlib import Path
-
-# Load mapping from YAML
-class_id_map = load_class_id_map_from_yaml(Path('configs/convert_class_id_map.yaml'))
-
-# Convert entire folder (in-place)
-results = convert_folder_class_id_by_map(
-    input_dir='datasets/labels',
-    class_id_map=class_id_map
-)
-
-# Convert with output directory
-results = convert_folder_class_id_by_map(
-    input_dir='datasets/labels',
-    class_id_map=class_id_map,
-    output_dir='datasets/labels_remapped'
-)
-
-# Or use mapping directly
-custom_map = {95: 0, 101: 1, 102: 1}
-results = convert_folder_class_id_by_map(
-    input_dir='datasets/labels',
-    class_id_map=custom_map
-)
-```
-
-## Split Dataset into Train/Val/Test
-
-Split a GCS folder of `.txt` labels into train/val (and optionally test) subsets, fetching each
-label's matching image (by file stem) from a GCS images folder — default
-`gs://prd-vveesee-edge-submit/images`. Labels are automatically converted from
-`class_id x y w h r` → `class_id x y w h` during the copy. Both labels and images are read and
-written directly to/from GCS; nothing is downloaded locally.
-
-**CLI:**
 ```bash
 # Train/val split (80/20)
 python src/data/preprocessing.py \
     --source-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7/labels \
     --output-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7_split
 
-# Train/val/test split (70/20/10)
-python src/data/preprocessing.py \
-    --source-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7/labels \
-    --output-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7_split \
-    --train-pct 0.7 \
-    --val-pct 0.2 \
-    --test-pct 0.1
-
-# Custom images source and seed
+# Train/val/test split (70/20/10), custom images source and seed
 python src/data/preprocessing.py \
     --source-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7/labels \
     --output-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7_split \
     --images-base-path gs://dev-vveesee-edge-submit/images \
-    --train-pct 0.8 \
+    --train-pct 0.7 \
     --val-pct 0.2 \
+    --test-pct 0.1 \
     --seed 123
 ```
 
-**Output structure (under `--output-dir`):**
-```
-images/
-├── train/
-├── val/
-└── test/      ← only when --test-pct > 0
-labels/
-├── train/
-├── val/
-└── test/      ← only when --test-pct > 0
-```
+Output (under `--output-dir`): `images/{train,val,test}/` and `labels/{train,val,test}/`
+(`test/` only when `--test-pct > 0`).
 
-**Python API:**
+Python API:
 ```python
 from src.data.preprocessing import split_dataset
 
@@ -326,137 +186,193 @@ split_dataset(
 )
 ```
 
-#### Crop Bounding Boxes from Images
-Extract and save individual bounding boxes from images organized by class (useful for creating focused datasets or data augmentation):
+**Option C — Bring your own local dataset.** Just arrange it into the target layout above.
 
-**Configuration:**
-You can optionally use `src/data/bbox_crop_config.yaml` to filter which classes to include:
+### 2. Convert / Fix Labels
+
+`src/data/label_converter.py` and its CLI wrappers handle common label-format fixups.
+
+**Rotated boxes → YOLO OBB** (`class_id x y w h r` → OBB corner format):
+```bash
+python -c "from src.data.label_converter import convert_folder_xywhr_to_obb; \
+convert_folder_xywhr_to_obb('input_labels', 'output_labels')"
+```
+```python
+from src.data.label_converter import convert_folder_xywhr_to_obb, convert_file_xywhr_to_obb
+
+convert_folder_xywhr_to_obb(
+    input_dir='datasets/labels_rotated',
+    output_dir='datasets/labels_obb',
+    angle_unit='radians',  # or 'degrees'
+    precision=6,
+)
+convert_file_xywhr_to_obb('labels/image1.txt', 'labels_obb/image1.txt')
+```
+
+**Rotated boxes → standard YOLO xywh** (`class_id x y w h r` → `class_id x y w h`):
+```bash
+python convert_xywhr_to_xywh.py --input-dir datasets/labels_rotated --output-dir datasets/labels
+python convert_xywhr_to_xywh.py --input-dir in_labels --output-dir out_labels --precision 6
+```
+```python
+from src.data.label_converter import convert_folder_xywhr_to_xywh, convert_file_xywhr_to_xywh
+
+convert_folder_xywhr_to_xywh(input_dir='datasets/labels_rotated', output_dir='datasets/labels', precision=6)
+convert_file_xywhr_to_xywh('labels/image1.txt', 'labels/image1_converted.txt', precision=6)
+```
+
+**Collapse all class IDs to 0** (single-class training):
+```bash
+python convert_class_id_to_zero.py --input-dir datasets/labels
+python convert_class_id_to_zero.py --input-dir in_labels --output-dir out_labels
+```
+```python
+from src.data.label_converter import convert_folder_class_id_to_zero, convert_file_class_id_to_zero
+
+convert_folder_class_id_to_zero(input_dir='datasets/labels')                       # in-place
+convert_folder_class_id_to_zero(input_dir='datasets/labels', output_dir='datasets/labels_zero_class')
+convert_file_class_id_to_zero('labels/image1.txt', 'labels/image1_zero_class.txt')
+```
+
+**Remap class IDs by a custom table** (e.g. consolidating classes):
+
+`configs/convert_class_id_map.yaml`:
 ```yaml
-# src/data/bbox_crop_config.yaml
+class_id_map:
+  95: 0    # original class ID → new class ID
+  101: 1
+```
+```bash
+python convert_class_id_by_map.py --input-dir datasets/labels --map-config configs/convert_class_id_map.yaml
+python convert_class_id_by_map.py --input-dir in_labels --output-dir out_labels --map-config configs/convert_class_id_map.yaml
+```
+```python
+from pathlib import Path
+from src.data.label_converter import convert_folder_class_id_by_map, load_class_id_map_from_yaml
+
+class_id_map = load_class_id_map_from_yaml(Path('configs/convert_class_id_map.yaml'))
+convert_folder_class_id_by_map(input_dir='datasets/labels', class_id_map=class_id_map)                          # in-place
+convert_folder_class_id_by_map(input_dir='datasets/labels', class_id_map=class_id_map, output_dir='datasets/labels_remapped')
+
+# or inline
+convert_folder_class_id_by_map(input_dir='datasets/labels', class_id_map={95: 0, 101: 1, 102: 1})
+```
+
+### 3. Crop Bounding Boxes (optional)
+
+Extract individual bounding boxes into per-class folders — useful for building a classifier
+dataset or focused crops (`src/data/bbox_cropper.py`).
+
+Optionally filter classes via `src/data/bbox_crop_config.yaml`:
+```yaml
 include_classes:
   - BOTTLE
   - JUG
   - REFILL POUCH
   - SACHET
 ```
-If no config is provided, all classes are included.
+(omit the config to include all classes)
 
-**CLI:**
 ```bash
-# Crop all classes
-python src/data/bbox_cropper.py \
-    --images-dir datasets/homecare/images/train \
-    --labels-dir datasets/homecare/labels/train \
-    --output-dir ./crops_homecare \
-    --classes-file datasets/homecare/classes.txt
-
-# Crop with class filtering using config
 python src/data/bbox_cropper.py \
     --images-dir datasets/homecare/images/train \
     --labels-dir datasets/homecare/labels/train \
     --output-dir ./crops_homecare \
     --classes-file datasets/homecare/classes.txt \
-    --config-file src/data/bbox_crop_config.yaml
-
-# Crop with optional padding
-python src/data/bbox_cropper.py \
-    --images-dir datasets/homecare/images/train \
-    --labels-dir datasets/homecare/labels/train \
-    --output-dir ./crops_homecare \
-    --classes-file datasets/homecare/classes.txt \
+    --config-file src/data/bbox_crop_config.yaml \
     --padding 10
 ```
-
-**Python API:**
 ```python
 from src.data.bbox_cropper import BBoxCropper
-from pathlib import Path
 
-# Crop all classes
 cropper = BBoxCropper(
     images_dir='datasets/homecare/images/train',
     labels_dir='datasets/homecare/labels/train',
     output_dir='./crops_homecare',
     classes_file='datasets/homecare/classes.txt',
+    config_file='src/data/bbox_crop_config.yaml',  # optional
+    padding=10,                                     # optional
 )
-
-# Crop with class filtering
-cropper = BBoxCropper(
-    images_dir='datasets/homecare/images/train',
-    labels_dir='datasets/homecare/labels/train',
-    output_dir='./crops_homecare',
-    classes_file='datasets/homecare/classes.txt',
-    config_file='src/data/bbox_crop_config.yaml',  # Optional
-    padding=10  # Optional: add padding around crops
-)
-
-# Process all images
 stats = cropper.process_folder()
-
-# Print summary
 cropper.print_summary()
 ```
+Output: `crops_homecare/<CLASS_NAME>/{image}_{n}.jpg`.
 
-**Output Structure:**
-```
-crops_homecare/
-├── BOTTLE/
-│   ├── image1_0.jpg
-│   ├── image1_1.jpg
-│   └── image2_0.jpg
-├── JUG/
-│   └── image3_0.jpg
-├── REFILL POUCH/
-│   └── image1_2.jpg
-└── SACHET/
-    └── image4_0.jpg
-```
-
-Crops are named `{original_image_name}_{crop_number}.jpg` and organized into subdirectories by class name.
-
-### 3. Configure Dataset
+### 4. Configure the Dataset
 
 Edit `configs/dataset_config.yaml`:
 ```yaml
-path: datasets/my_dataset
-train: images/train
-val: images/val
-test: images/test
-nc: 5  # Number of classes
-names: ['class1', 'class2', 'class3', 'class4', 'class5']
+path: ./datasets/rtd        # dataset root
+train: ./images/train
+val: ./images/val
+test: ./images/test
+nc: 2                       # number of classes
+names:
+  0: RTD
+  1: Shelf
 ```
 
-### 4. Train Model
+Sanity-check both config files before training:
+```bash
+python validate_config.py
+```
+
+### 5. Train
 
 ```bash
 python train.py \
     --data configs/dataset_config.yaml \
+    --config configs/training_config.yaml \
     --epochs 100 \
     --batch-size 32 \
     --imgsz 640 \
     --validate
 ```
 
-### 5. Run Inference
+Values not passed on the CLI fall back to `configs/training_config.yaml`, then to the script's
+built-in defaults. Key flags:
 
-**On a single image:**
+| Argument | Default | Description |
+|---|---|---|
+| `--data` | `configs/dataset_config.yaml` | Dataset YAML |
+| `--config` | `configs/training_config.yaml` | Training hyperparameter YAML (provides defaults for the flags below) |
+| `--epochs` | `100` | Training epochs |
+| `--batch-size` | `32` | Batch size |
+| `--imgsz` | `640` | Input image size |
+| `--patience` | `20` | Early stopping patience |
+| `--lr0` / `--lrf` | `0.01` / `0.01` | Initial LR / final LR ratio |
+| `--momentum` | `0.937` | SGD momentum |
+| `--weight-decay` | `0.0005` | L2 regularization |
+| `--warmup-epochs` | `3` | LR warmup epochs |
+| `--save-dir` | `runs/train` | Where results are written |
+| `--log-dir` | `logs` | Where logs are written |
+| `--no-cuda` | off | Force CPU |
+| `--seed` | `42` | Random seed |
+| `--validate` | off | Run validation after training |
+
+### 6. Run Inference
+
+`infer.py` supports four modes via `--mode`. Common flags across all modes: `--weights`
+(required), `--conf` (default `0.5`), `--iou` (default `0.45`), `--device {cpu,cuda}` (default
+`cpu`), `--class-id-map` (optional, see [below](#7-remap-class-ids-at-inference-time)).
+
+**Single image or a folder of images** (`--mode image`):
 ```bash
-python infer.py \
-    --weights runs/detect/train/weights/best.pt \
-    --source path/to/image.jpg \
-    --mode image
+python infer.py --weights runs/detect/train/weights/best.pt --source path/to/image.jpg --mode image
+python infer.py --weights runs/detect/train/weights/best.pt --source path/to/image_folder/ --mode image
 ```
 
-**On a video:**
+**Video** (`--mode video`):
 ```bash
 python infer.py \
     --weights runs/detect/train/weights/best.pt \
     --source path/to/video.mp4 \
     --mode video \
-    --output output.mp4
+    --output output.mp4 \
+    --fps 30
 ```
 
-**On webcam:**
+**Webcam** (`--mode webcam`):
 ```bash
 python infer.py \
     --weights runs/detect/train/weights/best.pt \
@@ -465,7 +381,8 @@ python infer.py \
     --output webcam_output.mp4
 ```
 
-**On a list of images in GCS:**
+**A list of images in GCS** (`--mode gcs_images`) — batch inference straight from GCS, no
+manual download step:
 
 Create a text file listing one `gs://` image URI per line, then run:
 ```bash
@@ -476,177 +393,192 @@ python infer.py \
     --output results.json
 ```
 Each image is downloaded to a temp directory (cleaned up afterward), predicted on, and the
-detections are written to `results.json` keyed by `gcs_uri`. Uses your default GCS credentials
-(e.g. `gcloud auth application-default login`).
+detections are written to the output JSON keyed by `gcs_uri`. If `--output` is omitted, results
+are written to `<images-file-stem>_results.json` next to `images.txt`. Uses your default GCS
+credentials (`gcloud auth application-default login`).
 
-### 6. Evaluate Model
+### 7. Remap Class IDs at Inference Time
+
+Two ways to apply a class ID remap (same `class_id_map` YAML format as
+[label conversion](#2-convert--fix-labels)) without retraining:
+
+**At inference time**, pass the map straight to `infer.py`:
+```bash
+python infer.py \
+    --weights runs/detect/train/weights/best.pt \
+    --source path/to/image.jpg \
+    --mode image \
+    --class-id-map configs/convert_class_id_map.yaml
+```
+
+**Baked into the model** (so every future load reflects the new IDs), via
+`embed_class_mapping_in_model.py`:
+```bash
+python embed_class_mapping_in_model.py \
+    --model models/best.pt \
+    --mapping configs/inference_class_id_map.yaml \
+    --output models/best_mapped.pt
+```
+
+### 8. Evaluate
 
 ```bash
 python evaluate.py \
     --weights runs/detect/train/weights/best.pt \
     --test-dir datasets/my_dataset/images/test \
-    --output eval_results.json
+    --output eval_results.json \
+    --conf 0.5 \
+    --iou 0.5 \
+    --device cuda
 ```
 
-## Usage Examples
+## Notebooks
 
-### Python API
+- **`YOLO_Training_Notebook.ipynb`** — interactive local walkthrough: install deps, prepare
+  dataset, configure model, train, evaluate, save/load weights.
+- **`VertexAI_Training_Notebook.ipynb`** — submit training as a managed Vertex AI custom job:
+  configure, authenticate, (optionally) rebuild/push the training Docker image via Cloud Build,
+  write the dataset config to GCS, submit and monitor the job, download results, then optionally
+  run inference on the downloaded weights.
+
+## Python API Reference
 
 ```python
 from src.models import YOLOModel
 from src.training import YOLOTrainer
 from src.inference import YOLOPredictor
+from src.evaluation import YOLOEvaluator
+from src.data import YOLODataset, create_dataloader
 from utils import setup_seed, get_device
 
-# Setup
 setup_seed(42)
 device = get_device()
-
-# Initialize trainer
-trainer = YOLOTrainer()
-
-# Train
-results = trainer.train(
-    data_yaml='configs/dataset_config.yaml',
-    epochs=100,
-    batch_size=32
-)
-
-# Inference
-model = YOLOModel(model_size='m')
-predictor = YOLOPredictor(model)
-results = predictor.predict_image('path/to/image.jpg')
-
-# Access detections
-for detection in results['detections']:
-    print(f"{detection['class_name']}: {detection['confidence']:.2f}")
 ```
 
-## Configuration
-
-### Training Configuration (`configs/training_config.yaml`)
-
-Key parameters:
-- `model_size`: Model size (n/s/m/l/x)
-- `epochs`: Number of training epochs
-- `batch_size`: Batch size
-- `imgsz`: Input image size
-- `lr0`: Initial learning rate
-- `momentum`: SGD momentum
-- `weight_decay`: L2 regularization
-- `patience`: Early stopping patience
-
-### Dataset Configuration (`configs/dataset_config.yaml`)
-
-- `path`: Root dataset directory
-- `train/val/test`: Paths to train/val/test splits
-- `nc`: Number of classes
-- `names`: Class names list
-
-## API Reference
-
-### YOLOModel
+**YOLOModel**
 ```python
 model = YOLOModel(model_size='m', device='cuda')
-model.train(data_yaml, epochs=100, batch_size=32)
-results = model.predict(source='image.jpg', conf=0.5)
-model.export(format='onnx')
+model.load_weights('runs/detect/train/weights/best.pt')
+results = model.train(data_yaml, epochs=100, batch_size=32)
+predictions = model.predict(source='image.jpg', conf=0.5)
+model.export(format='onnx')   # also supports 'torchscript', 'tflite'
 ```
 
-### YOLOTrainer
+**YOLOTrainer**
 ```python
 trainer = YOLOTrainer(config_path='configs/training_config.yaml')
-results = trainer.train(data_yaml, epochs=100)
+results = trainer.train(data_yaml='configs/dataset_config.yaml', epochs=100, batch_size=32)
 trainer.validate(data_yaml)
 trainer.log_metrics({'loss': 0.5})
 ```
 
-### YOLOPredictor
+**YOLOPredictor**
 ```python
-predictor = YOLOPredictor(model, conf_threshold=0.5)
+predictor = YOLOPredictor(model, conf_threshold=0.5, iou_threshold=0.45)
 results = predictor.predict_image('image.jpg')
-results = predictor.predict_video('video.mp4', output_path='output.mp4')
+results = predictor.predict_batch(['img1.jpg', 'img2.jpg'])
+results = predictor.predict_video('video.mp4', output_path='out.mp4')
 results = predictor.predict_webcam(duration=30)
+
+for det in results['detections']:
+    print(f"{det['class_name']}: {det['confidence']:.2f}")
 ```
 
-### YOLOEvaluator
+**YOLOEvaluator**
 ```python
 evaluator = YOLOEvaluator(model)
 results = evaluator.evaluate('test_dir/', conf_threshold=0.5)
 metrics = evaluator.compute_metrics(predictions, ground_truths)
 ```
 
-## Advanced Features
-
-### Custom Data Loading
+**YOLODataset / DataLoader**
 ```python
-from src.data import YOLODataset, create_dataloader
-
-dataset = YOLODataset(
-    img_dir='images/train',
-    label_dir='labels/train',
-    img_size=640,
-    augment=True
-)
-
-loader = create_dataloader(
-    img_dir='images/train',
-    label_dir='labels/train',
-    batch_size=32,
-    shuffle=True
-)
+dataset = YOLODataset(img_dir='images/train', label_dir='labels/train', img_size=640, augment=True)
+loader = create_dataloader(img_dir='images/train', label_dir='labels/train', batch_size=32, shuffle=True)
 ```
 
-### Reproducibility
-```python
-from utils import setup_seed
+See `examples.py` for runnable versions of the above.
 
-# Set random seed for reproducible results
-setup_seed(42)
+## Configuration Reference
+
+**`configs/training_config.yaml`** (defaults for `train.py`):
+```yaml
+model_size: 'm'        # n, s, m, l, x
+epochs: 100
+batch_size: 8
+imgsz: 640
+patience: 20
+single_cls: false      # treat all classes as one
+lr0: 0.01
+lrf: 0.01
+# momentum, weight_decay, warmup_epochs, and augmentation params (hsv_*, degrees,
+# translate, scale, flipud, fliplr, mosaic) are also supported — see the file for
+# the full commented-out list.
+device: null            # null = auto-detect
+verbose: false
+save_period: 10
+data_dir: datasets
+log_dir: logs
+output_dir: train        # Ultralytics auto-increments: train, train1, train2, ... under runs/
 ```
 
-## Troubleshooting
+**`configs/dataset_config.yaml`**:
+```yaml
+path: ./datasets/my_dataset
+train: ./images/train
+val: ./images/val
+test: ./images/test
+nc: 5
+names:
+  0: class1
+  1: class2
+```
 
-### GPU Not Detected
+## GPU & Performance
+
+Check GPU availability:
+```python
+import torch
+print(f"CUDA available: {torch.cuda.is_available()}")
+print(f"GPU: {torch.cuda.get_device_name(0)}")
+print(f"CUDA version: {torch.version.cuda}")
+```
 ```python
 from utils import print_gpu_info
 print_gpu_info()
 ```
 
-### Memory Issues
-- Reduce `batch_size`
-- Reduce `imgsz`
-- Use a smaller model size (n or s instead of l or x)
+Force CPU: `python train.py --no-cuda`
 
-### Dataset Issues
-Ensure your dataset is in correct YOLO format:
-- Images: `.jpg`, `.jpeg`, `.png`
-- Labels: `.txt` files with same names as images
-- Coordinates: Normalized (0-1)
+**Batch size by GPU** (rule of thumb, `imgsz=640`): V100 16GB → 64, RTX 3090 → 128, T4 16GB → 32.
+Rough VRAM floor by model size (batch_size=32, imgsz=640): nano 2GB+, small 4GB+, medium 6GB+,
+large 12GB+.
 
-## Future Improvements
+**Image size vs. speed**: 640 = best accuracy/slowest, 416 = balanced, 320 = fastest/least
+accurate.
 
-- [ ] Multi-GPU training support
-- [ ] Mixed precision training
-- [ ] Advanced augmentation strategies
-- [ ] Model ensemble support
-- [ ] TensorFlow/PyTorch conversion utilities
-- [ ] Web UI for training monitoring
-- [ ] Docker containerization
+**Model size vs. speed/accuracy**: nano (~3.2M params, fastest) < small (~11.2M) < medium
+(~25.9M, balanced) < large (~52.9M) < xlarge (~71.4M, slowest/best).
+
+## Troubleshooting
+
+| Issue | Fix |
+|---|---|
+| `ModuleNotFoundError: No module named 'src'` | Run from the project root; if needed, `export PYTHONPATH="${PYTHONPATH}:$(pwd)"` |
+| Out of memory (OOM) during training | Reduce `--batch-size`, reduce `--imgsz`, or use a smaller `model_size` (n/s instead of l/x) |
+| Training slow | Check `nvidia-smi` for GPU utilization, verify CUDA install, check dataloader `num_workers`, reduce augmentation |
+| Poor accuracy | More/better-labeled training data, tune augmentation, tune hyperparameters in `training_config.yaml` |
+| Dataset/label loading errors | Confirm image/label basenames match, labels are in YOLO format, coordinates are normalized to `[0, 1]`, and `dataset_config.yaml` paths are correct |
+| GCS commands fail with auth errors | `gcloud auth application-default login`, and confirm your account has access to the source/destination buckets |
+
+## Development
+
+```bash
+pip install -r requirements-dev.txt   # pytest, black, flake8, isort
+```
 
 ## References
 
-- [Ultralytics YOLOv8](https://docs.ultralytics.com/)
+- [Ultralytics YOLOv8 Docs](https://docs.ultralytics.com/)
 - [YOLOv8 GitHub](https://github.com/ultralytics/ultralytics)
-
-## License
-
-MIT License
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-## Support
-
-For issues and questions, please open an issue on the GitHub repository.
+- [PyTorch Documentation](https://pytorch.org/docs/)

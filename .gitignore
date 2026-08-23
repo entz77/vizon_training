@@ -8,3 +8,5 @@ logs/
 *.pt
 runs/
 .venv
+venv
+.vscode/
