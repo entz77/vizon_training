@@ -18,13 +18,15 @@ class DetectorTrainer:
     Handles training, logging, checkpointing, and validation.
     """
     
-    def __init__(self, config_path=None, log_dir='logs'):
+    def __init__(self, config_path=None, log_dir='logs', model_type=None, model_size=None):
         """
         Initialize trainer.
         
         Args:
             config_path (str): Path to training configuration YAML file
             log_dir (str): Directory for training logs
+            model_type (str): Overrides `model_type` from the config (e.g. 'yolo', 'rfdetr')
+            model_size (str): Overrides `model_size` from the config
         """
         self.config = self._load_config(config_path) if config_path else {}
         self.log_dir = Path(log_dir)
@@ -34,8 +36,11 @@ class DetectorTrainer:
         self.logger = self._setup_logger()
         
         # Initialize model
-        self.model_type = self.config.get('model_type', 'yolo')
-        model_size = self.config.get('model_size')
+        config_type = self.config.get('model_type', 'yolo')
+        self.model_type = model_type or config_type
+        if model_size is None and self.model_type == config_type:
+            # A config size only makes sense for the backend it was written for
+            model_size = self.config.get('model_size')
         self.model = build_model(self.model_type, model_size)
         
         self.logger.info(

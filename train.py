@@ -42,7 +42,12 @@ def main(args):
     print("=" * 50)
     
     # Initialize trainer
-    trainer = DetectorTrainer(config_path=args.config, log_dir=args.log_dir)
+    trainer = DetectorTrainer(
+        config_path=args.config,
+        log_dir=args.log_dir,
+        model_type=args.model_type,
+        model_size=args.model_size
+    )
     
     # Train
     results = trainer.train(
@@ -100,6 +105,18 @@ if __name__ == '__main__':
     config = load_config_defaults(args.config)
     
     # Now add remaining arguments with defaults from config
+    parser.add_argument(
+        '--model-type',
+        type=str,
+        default=None,
+        help="Detection backend, overrides 'model_type' in the config (e.g. yolo, rfdetr)"
+    )
+    parser.add_argument(
+        '--model-size',
+        type=str,
+        default=None,
+        help="Model size/variant, overrides 'model_size' in the config"
+    )
     parser.add_argument(
         '--epochs',
         type=int,

@@ -41,9 +41,15 @@ vizon_training/
 │   │   ├── label_converter.py         # Label format conversion (OBB, xywh, class remap)
 │   │   ├── preprocessing.py            # GCS-native train/val/test split
 │   │   └── bbox_cropper.py             # Crop bounding boxes out of labeled images
-│   ├── models/yolo_model.py         # YOLO model wrapper (train/predict/export)
-│   ├── training/trainer.py          # Training pipeline + logging
-│   ├── evaluation/evaluator.py      # Metrics (precision/recall/F1, IoU)
+│   ├── models/                      # Pluggable detection backends
+│   │   ├── base.py                    # BaseDetector interface + Detection/ImageDetections types
+│   │   ├── registry.py                # build_model(model_type, model_size) + backend table
+│   │   ├── yolo_model.py              # Ultralytics YOLO backend
+│   │   └── rfdetr_model.py            # RF-DETR backend
+│   ├── training/trainer.py          # Training pipeline + logging (any backend)
+│   ├── evaluation/
+│   │   ├── evaluator.py               # Metrics (precision/recall/F1, IoU)
+│   │   └── split_metrics.py           # Backend-independent mAP on a dataset split
 │   └── inference/predictor.py       # Unified image/batch/video/webcam inference
 ├── configs/
 │   ├── training_config.yaml           # Training hyperparameters
@@ -89,8 +95,12 @@ pip install -r requirements-dev.txt
 
 Verify the install:
 ```bash
-python -c "from src.models import YOLOModel; print('Installation successful!')"
+python -c "from src.models import build_model; print('Installation successful!')"
+python -c "import rfdetr"   # RF-DETR backend (installed via rfdetr[train] in requirements.txt)
 ```
+
+> RF-DETR needs `numpy>=1.26` and torch ≥ 2.2, and its first use downloads pretrained weights
+> to `~/.roboflow/models/` (internet access required).
 
 Most GCS-backed commands below (`prepare_dataset.py`, `preprocessing.py`, `infer.py --mode
 gcs_images`) need GCP credentials with access to the relevant buckets:
@@ -335,12 +345,19 @@ python train.py \
 ```
 
 Values not passed on the CLI fall back to `configs/training_config.yaml`, then to the script's
-built-in defaults. Key flags:
+built-in defaults. The backend is chosen by `model_type` in that config (`yolo` or `rfdetr`).
+For RF-DETR, set e.g. `model_type: 'rfdetr'` and `model_size: 'base'`; the YOLO-only flags below
+(`--lr0`, `--lrf`, `--momentum`, `--weight-decay`, `--warmup-epochs`) and `--imgsz` are ignored,
+and backend-specific arguments go in the config's `train_args:` block (e.g. `lr`,
+`grad_accum_steps`). RF-DETR trains from your existing YOLO-format dataset: a `train/valid/test`
+view is generated automatically next to the run folder (`runs/<save-dir>_dataset/`). Checkpoints are written to
+`runs/<save-dir>/` (use `checkpoint_best_total.pth` for inference). Key flags:
 
 | Argument | Default | Description |
 |---|---|---|
 | `--data` | `configs/dataset_config.yaml` | Dataset YAML |
 | `--config` | `configs/training_config.yaml` | Training hyperparameter YAML (provides defaults for the flags below) |
+| `--model-type` / `--model-size` | from config | Override `model_type` / `model_size` in the training config (e.g. `--model-type rfdetr --model-size base`) |
 | `--epochs` | `100` | Training epochs |
 | `--batch-size` | `32` | Batch size |
 | `--imgsz` | `640` | Input image size |
@@ -359,7 +376,10 @@ built-in defaults. Key flags:
 
 `infer.py` supports four modes via `--mode`. Common flags across all modes: `--weights`
 (required), `--conf` (default `0.5`), `--iou` (default `0.45`), `--device {cpu,cuda}` (default
-`cpu`), `--class-id-map` (optional, see [below](#7-remap-class-ids-at-inference-time)).
+`cpu`), `--class-id-map` (optional, see [below](#7-remap-class-ids-at-inference-time)),
+`--model-type {yolo,rfdetr}` (default `yolo`) and `--model-size` (default: backend default, `m` for
+yolo / `base` for rfdetr; must match the size the weights were trained with). RF-DETR is NMS-free,
+so `--iou` has no effect with it.
 
 **Single image or a folder of images** (`--mode image`):
 ```bash
@@ -440,6 +460,11 @@ python evaluate.py \
     --device cuda
 ```
 
+Add `--model-type rfdetr --model-size base` (and an RF-DETR checkpoint for `--weights`) to evaluate
+an RF-DETR model. For mAP against ground-truth labels, use `model.val(data_yaml)` (see the API
+reference): YOLO returns Ultralytics' metrics; RF-DETR returns `map`, `map50`, `map75`,
+`per_class_map` and `num_images` for the `val` split (pass `split='test'` for the test split).
+
 ## Notebooks
 
 - **`YOLO_Training_Notebook.ipynb`** — interactive local walkthrough: install deps, prepare
@@ -452,7 +477,7 @@ python evaluate.py \
 ## Python API Reference
 
 ```python
-from src.models import YOLOModel
+from src.models import build_model, YOLOModel, RFDETRModel   # or BaseDetector for typing
 from src.training import DetectorTrainer
 from src.inference import DetectorPredictor
 from src.evaluation import DetectorEvaluator
@@ -462,6 +487,19 @@ from utils import setup_seed, get_device
 setup_seed(42)
 device = get_device()
 ```
+
+**build_model / BaseDetector**
+
+All backends implement `BaseDetector` (`train`, `val`, `predict`, `export`, `load_weights`).
+`predict()` returns a list of `ImageDetections` (each with `detections` of `Detection`:
+`class_id`, `class_name`, `confidence`, `x1..y2`) regardless of backend.
+```python
+model = build_model('rfdetr', 'base', device='cuda')    # or build_model('yolo', 'm')
+model.load_weights('runs/train/checkpoint_best_total.pth')
+metrics = model.val('configs/dataset_config.yaml')       # RF-DETR: {'map', 'map50', 'map75', ...}
+```
+To add a backend, subclass `BaseDetector` in `src/models/<name>_model.py` and add it to
+`_BACKENDS` in `src/models/registry.py`.
 
 **YOLOModel**
 ```python
@@ -511,13 +549,17 @@ See `examples.py` for runnable versions of the above.
 
 **`configs/training_config.yaml`** (defaults for `train.py`):
 ```yaml
-model_size: 'm'        # n, s, m, l, x
+model_type: 'yolo'     # yolo | rfdetr
+model_size: 'm'        # yolo: n, s, m, l, x | rfdetr: nano, small, medium, base, large
+# train_args:          # optional extra args passed to the backend's train()
+#   lr: 0.0001           # rfdetr
+#   grad_accum_steps: 4  # rfdetr
 epochs: 100
 batch_size: 8
 imgsz: 640
 patience: 20
-single_cls: false      # treat all classes as one
-lr0: 0.01
+single_cls: false      # treat all classes as one (yolo only)
+lr0: 0.01              # lr0/lrf/momentum/weight_decay/warmup_epochs: yolo only
 lrf: 0.01
 # momentum, weight_decay, warmup_epochs, and augmentation params (hsv_*, degrees,
 # translate, scale, flipud, fliplr, mosaic) are also supported — see the file for
@@ -573,6 +615,8 @@ accurate.
 | Issue | Fix |
 |---|---|
 | `ModuleNotFoundError: No module named 'src'` | Run from the project root; if needed, `export PYTHONPATH="${PYTHONPATH}:$(pwd)"` |
+| RF-DETR `ImportError` | `pip install "rfdetr[train]"` (the `[train]` extra is needed for training) |
+| RF-DETR training OOM on a small GPU | Use `--batch-size 1` with `train_args: {grad_accum_steps: N}`; base fit in ~1.3 GB at batch 1 |
 | Out of memory (OOM) during training | Reduce `--batch-size`, reduce `--imgsz`, or use a smaller `model_size` (n/s instead of l/x) |
 | Training slow | Check `nvidia-smi` for GPU utilization, verify CUDA install, check dataloader `num_workers`, reduce augmentation |
 | Poor accuracy | More/better-labeled training data, tune augmentation, tune hyperparameters in `training_config.yaml` |
@@ -589,4 +633,5 @@ pip install -r requirements-dev.txt   # pytest, black, flake8, isort
 
 - [Ultralytics YOLOv8 Docs](https://docs.ultralytics.com/)
 - [YOLOv8 GitHub](https://github.com/ultralytics/ultralytics)
+- [RF-DETR GitHub](https://github.com/roboflow/rf-detr)
 - [PyTorch Documentation](https://pytorch.org/docs/)
