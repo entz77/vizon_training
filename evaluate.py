@@ -1,5 +1,5 @@
 """
-Evaluation script for YOLO model
+Evaluation script for detection models
 """
 
 import argparse
@@ -9,24 +9,24 @@ import json
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.models import YOLOModel
-from src.evaluation import YOLOEvaluator
+from src.models import build_model, available_models
+from src.evaluation import DetectorEvaluator
 
 
 def main(args):
     """Main evaluation function"""
     
     print("=" * 50)
-    print("YOLO Model Evaluation")
+    print("Model Evaluation")
     print("=" * 50)
     
     # Load model
     print(f"Loading model: {args.weights}")
-    model = YOLOModel(device=args.device)
+    model = build_model(args.model_type, args.model_size, device=args.device)
     model.load_weights(args.weights)
     
     # Initialize evaluator
-    evaluator = YOLOEvaluator(model)
+    evaluator = DetectorEvaluator(model)
     
     # Evaluate
     print(f"Evaluating on: {args.test_dir}")
@@ -50,9 +50,22 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Evaluate YOLO model'
+        description='Evaluate detection model'
     )
     
+    parser.add_argument(
+        '--model-type',
+        type=str,
+        default='yolo',
+        choices=available_models(),
+        help='Detection backend'
+    )
+    parser.add_argument(
+        '--model-size',
+        type=str,
+        default=None,
+        help="Model size/variant (backend default if omitted, e.g. 'm' for yolo, 'base' for rfdetr)"
+    )
     parser.add_argument(
         '--weights',
         type=str,

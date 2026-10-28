@@ -1,3 +1,3 @@
-from .predictor import YOLOPredictor
+from .predictor import DetectorPredictor, YOLOPredictor
 
-__all__ = ['YOLOPredictor']
+__all__ = ['DetectorPredictor', 'YOLOPredictor']

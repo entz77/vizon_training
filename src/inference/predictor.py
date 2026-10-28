@@ -1,5 +1,5 @@
 """
-YOLO Inference and Prediction Module
+Object Detection Inference and Prediction Module
 """
 
 import cv2
@@ -9,9 +9,9 @@ from typing import Union, List, Tuple, Optional, Dict
 import torch
 
 
-class YOLOPredictor:
+class DetectorPredictor:
     """
-    High-level inference interface for YOLO object detection.
+    High-level inference interface for object detection.
     Handles predictions on images, videos, and real-time streams.
     """
     
@@ -20,7 +20,7 @@ class YOLOPredictor:
         Initialize predictor.
         
         Args:
-            model: YOLOModel instance
+            model: BaseDetector instance (YOLOModel, RFDETRModel, ...)
             conf_threshold (float): Confidence threshold
             iou_threshold (float): IOU threshold for NMS
             class_id_map (dict): Optional mapping of class IDs. Maps original class IDs to new class IDs.
@@ -179,7 +179,7 @@ class YOLOPredictor:
             
             # Draw and display
             frame_with_boxes = self._draw_boxes(frame, pred_data)
-            cv2.imshow('YOLO Detection', frame_with_boxes)
+            cv2.imshow('Detection', frame_with_boxes)
             
             if out:
                 out.write(frame_with_boxes)
@@ -195,41 +195,38 @@ class YOLOPredictor:
         return predictions
     
     def _format_results(self, result):
-        """Format YOLO results into standardized dict, applying class ID mapping if available"""
+        """Format backend-neutral ImageDetections into a standardized dict, applying class ID mapping if available"""
         detections = []
-        
-        if result.boxes is not None:
-            for box in result.boxes:
-                original_class_id = int(box.cls[0]) if box.cls is not None else -1
-                # Apply class ID mapping if available
-                mapped_class_id = original_class_id
-                if self.class_id_map is not None and original_class_id in self.class_id_map:
-                    mapped_class_id = self.class_id_map[original_class_id]
-                
-                detection = {
-                    'class_id': mapped_class_id,
-                    'original_class_id': original_class_id if original_class_id != mapped_class_id else None,
-                    'class_name': result.names[int(box.cls[0])] if box.cls is not None else 'Unknown',
-                    'confidence': float(box.conf[0]) if box.conf is not None else 0,
-                    'bbox': {
-                        'x1': float(box.xyxy[0][0]),
-                        'y1': float(box.xyxy[0][1]),
-                        'x2': float(box.xyxy[0][2]),
-                        'y2': float(box.xyxy[0][3])
-                    },
-                    'bbox_normalized': {
-                        'x_center': float(box.xywhn[0][0]),
-                        'y_center': float(box.xywhn[0][1]),
-                        'width': float(box.xywhn[0][2]),
-                        'height': float(box.xywhn[0][3])
-                    }
+        shape = result.image_shape
+        h, w = shape if shape is not None else (None, None)
+
+        for det in result.detections:
+            original_class_id = det.class_id
+            # Apply class ID mapping if available
+            mapped_class_id = original_class_id
+            if self.class_id_map is not None and original_class_id in self.class_id_map:
+                mapped_class_id = self.class_id_map[original_class_id]
+
+            detection = {
+                'class_id': mapped_class_id,
+                'original_class_id': original_class_id if original_class_id != mapped_class_id else None,
+                'class_name': det.class_name,
+                'confidence': det.confidence,
+                'bbox': {'x1': det.x1, 'y1': det.y1, 'x2': det.x2, 'y2': det.y2},
+            }
+            if w and h:
+                detection['bbox_normalized'] = {
+                    'x_center': (det.x1 + det.x2) / 2 / w,
+                    'y_center': (det.y1 + det.y2) / 2 / h,
+                    'width': (det.x2 - det.x1) / w,
+                    'height': (det.y2 - det.y1) / h,
                 }
-                detections.append(detection)
-        
+            detections.append(detection)
+
         return {
-            'image_path': result.path if hasattr(result, 'path') else None,
+            'image_path': result.image_path,
             'detections': detections,
-            'image_shape': result.orig_shape if hasattr(result, 'orig_shape') else None
+            'image_shape': shape
         }
     
     def load_class_id_map(self, yaml_path):
@@ -301,3 +298,7 @@ class YOLOPredictor:
             )
         
         return frame_copy
+
+
+# Backwards-compatible alias
+YOLOPredictor = DetectorPredictor

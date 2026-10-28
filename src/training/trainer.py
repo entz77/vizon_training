@@ -1,5 +1,5 @@
 """
-YOLO Model Training Manager
+Object Detection Model Training Manager
 """
 
 import os
@@ -9,12 +9,12 @@ from pathlib import Path
 from datetime import datetime
 import yaml
 
-from src.models import YOLOModel
+from src.models import build_model
 
 
-class YOLOTrainer:
+class DetectorTrainer:
     """
-    Complete training pipeline for YOLO models.
+    Complete training pipeline for detection models (YOLO, RF-DETR, ...).
     Handles training, logging, checkpointing, and validation.
     """
     
@@ -34,10 +34,13 @@ class YOLOTrainer:
         self.logger = self._setup_logger()
         
         # Initialize model
-        model_size = self.config.get('model_size', 'm')
-        self.model = YOLOModel(model_size=model_size)
+        self.model_type = self.config.get('model_type', 'yolo')
+        model_size = self.config.get('model_size')
+        self.model = build_model(self.model_type, model_size)
         
-        self.logger.info(f"Trainer initialized with model size: {model_size}")
+        self.logger.info(
+            f"Trainer initialized with model: {self.model_type} ({self.model.model_size})"
+        )
     
     def _load_config(self, config_path):
         """Load configuration from YAML file"""
@@ -46,7 +49,7 @@ class YOLOTrainer:
     
     def _setup_logger(self):
         """Setup logging"""
-        logger = logging.getLogger('YOLOTrainer')
+        logger = logging.getLogger('DetectorTrainer')
         logger.setLevel(logging.INFO)
         
         # File handler
@@ -86,7 +89,7 @@ class YOLOTrainer:
         save_dir='run'
     ):
         """
-        Train YOLO model.
+        Train the configured detection model.
         
         Args:
             data_yaml (str): Path to dataset configuration YAML
@@ -105,26 +108,30 @@ class YOLOTrainer:
             dict: Training results
         """
         self.logger.info("=" * 50)
-        self.logger.info("Starting YOLO Training")
+        self.logger.info(f"Starting {self.model_type} Training")
         self.logger.info("=" * 50)
         self.logger.info(f"Data YAML: {data_yaml}")
         self.logger.info(f"Epochs: {epochs}")
         self.logger.info(f"Batch Size: {batch_size}")
         self.logger.info(f"Image Size: {imgsz}")
         
-        # Extract additional parameters from config
-        kwargs = {
-            'lr0': lr0,
-            'lrf': lrf,
-            'momentum': momentum,
-            'weight_decay': weight_decay,
-            'warmup_epochs': warmup_epochs,
-        }
-        
-        # Add single_cls if specified in config
-        if self.config.get('single_cls', False):
-            kwargs['single_cls'] = True
-            self.logger.info("Training with single_cls=True")
+        # Backend-specific hyperparameters
+        kwargs = {}
+        if self.model_type == 'yolo':
+            kwargs['verbose'] = True
+            kwargs.update({
+                'lr0': lr0,
+                'lrf': lrf,
+                'momentum': momentum,
+                'weight_decay': weight_decay,
+                'warmup_epochs': warmup_epochs,
+            })
+            # Add single_cls if specified in config
+            if self.config.get('single_cls', False):
+                kwargs['single_cls'] = True
+                self.logger.info("Training with single_cls=True")
+        # Extra per-backend args from the config's `train_args` section
+        kwargs.update(self.config.get('train_args') or {})
         
         # Train
         results = self.model.train(
@@ -135,7 +142,6 @@ class YOLOTrainer:
             patience=patience,
             save_dir=save_dir,
             device=self.model.device,
-            verbose=True,
             **kwargs
         )
         
@@ -160,13 +166,15 @@ class YOLOTrainer:
             self.model.load_weights(weights_path)
         
         self.logger.info("Starting validation...")
-        results = self.model.val(
-            data_yaml=data_yaml,
-            imgsz=imgsz,
-            batch_size=batch_size
-        )
-        
-        return results
+        try:
+            return self.model.val(
+                data_yaml=data_yaml,
+                imgsz=imgsz,
+                batch_size=batch_size
+            )
+        except NotImplementedError as e:
+            self.logger.warning(f"Validation skipped: {e}")
+            return None
     
     def save_config(self, save_path):
         """Save training configuration"""
@@ -183,3 +191,7 @@ class YOLOTrainer:
             log_msg = f"Step {step} - " + log_msg
         
         self.logger.info(log_msg)
+
+
+# Backwards-compatible alias
+YOLOTrainer = DetectorTrainer

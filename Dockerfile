@@ -1,4 +1,5 @@
-FROM pytorch/pytorch:2.0.0-cuda11.7-cudnn8-runtime
+# rfdetr requires torch>=2.2 and Python>=3.10
+FROM pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime
 
 WORKDIR /app
 

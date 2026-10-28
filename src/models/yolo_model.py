@@ -2,17 +2,21 @@
 YOLO Model wrapper using Ultralytics YOLO26
 """
 
-import torch
 from ultralytics import YOLO
-from pathlib import Path
-from typing import Optional, Dict
+from typing import List, Optional, Dict
 
-class YOLOModel:
+from .base import BaseDetector, Detection, ImageDetections
+
+
+class YOLOModel(BaseDetector):
     """
     Wrapper class for Ultralytics YOLO model.
     Provides easy interface for loading, training, and inference.
     """
-    
+
+    model_type = 'yolo'
+    default_size = 'm'
+
     def __init__(self, model_size='m', device=None, class_id_map: Optional[Dict[int, int]] = None):
         """
         Initialize YOLO model.
@@ -23,12 +27,10 @@ class YOLOModel:
             device (str): Device to use - 'cuda' or 'cpu'. Auto-detected if None.
             class_id_map (dict): Optional mapping of class IDs. Maps original class IDs to new class IDs.
         """
-        self.model_size = model_size
-        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
-        self.class_id_map = class_id_map
-        
+        super().__init__(model_size=model_size, device=device, class_id_map=class_id_map)
+
         # Initialize model
-        self.model = YOLO(f'yolo26{model_size}.pt')
+        self.model = YOLO(f'yolo26{self.model_size}.pt')
         self.model.to(self.device)
     
     def train(
@@ -103,7 +105,7 @@ class YOLOModel:
         
         return results
     
-    def predict(self, source, conf=0.25, iou=0.45, imgsz=640, device=None, verbose=True):
+    def predict(self, source, conf=0.25, iou=0.45, imgsz=640, device=None, verbose=True) -> List[ImageDetections]:
         """
         Run inference on images or video.
 
@@ -116,7 +118,7 @@ class YOLOModel:
             verbose (bool): Print per-image inference logs
 
         Returns:
-            list: Prediction results
+            list[ImageDetections]: One entry per image
         """
         device = device or self.device
 
@@ -129,7 +131,26 @@ class YOLOModel:
             verbose=verbose
         )
 
-        return results
+        return [self._to_image_detections(r) for r in results]
+
+    @staticmethod
+    def _to_image_detections(result) -> ImageDetections:
+        detections = []
+        if result.boxes is not None:
+            for box in result.boxes:
+                class_id = int(box.cls[0])
+                x1, y1, x2, y2 = (float(v) for v in box.xyxy[0])
+                detections.append(Detection(
+                    class_id=class_id,
+                    class_name=result.names[class_id],
+                    confidence=float(box.conf[0]),
+                    x1=x1, y1=y1, x2=x2, y2=y2,
+                ))
+        return ImageDetections(
+            image_path=getattr(result, 'path', None),
+            image_shape=tuple(result.orig_shape) if getattr(result, 'orig_shape', None) is not None else None,
+            detections=detections,
+        )
     
     def export(self, format='onnx', half=False):
         """
@@ -154,37 +175,4 @@ class YOLOModel:
         """
         self.model = YOLO(weights_path)
         self.model.to(self.device)
-        
-        # Auto-load mapping file if it exists alongside the model
-        weights_path = Path(weights_path)
-        mapping_file = weights_path.parent / f"{weights_path.stem}.mapping.yaml"
-        if mapping_file.exists():
-            print(f"Auto-loading mapping file: {mapping_file}")
-            self.load_class_id_map(str(mapping_file))
-    
-    def load_class_id_map(self, yaml_path):
-        """
-        Load class ID mapping from a YAML configuration file.
-        Updates the internal mapping used for predictions.
-        
-        Args:
-            yaml_path (str or Path): Path to the YAML mapping file
-            
-        Example YAML format:
-            class_id_map:
-              0: 2
-              1: 1
-              2: 0
-        """
-        from src.data.label_converter import load_class_id_map_from_yaml
-        self.class_id_map = load_class_id_map_from_yaml(Path(yaml_path))
-        return self.class_id_map
-    
-    def get_model_info(self):
-        """Get model information"""
-        return {
-            'model_size': self.model_size,
-            'device': self.device,
-            'model': str(self.model),
-            'class_id_map': self.class_id_map
-        }
+        self._load_sibling_mapping(weights_path)

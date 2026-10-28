@@ -1,5 +1,5 @@
 """
-YOLO Model Evaluation and Metrics
+Object Detection Evaluation and Metrics
 """
 
 import json
@@ -9,9 +9,9 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 
 
-class YOLOEvaluator:
+class DetectorEvaluator:
     """
-    Evaluate YOLO model performance on test set.
+    Evaluate detection model performance on test set.
     Computes standard object detection metrics: mAP, precision, recall, etc.
     """
     
@@ -20,7 +20,7 @@ class YOLOEvaluator:
         Initialize evaluator.
         
         Args:
-            model: YOLOModel instance
+            model: BaseDetector instance (YOLOModel, RFDETRModel, ...)
         """
         self.model = model
         self.results = {}
@@ -50,17 +50,16 @@ class YOLOEvaluator:
         
         for result in predictions:
             pred_data = {
-                'image': result.path,
+                'image': result.image_path,
                 'detections': []
             }
             
-            if result.boxes is not None:
-                for box in result.boxes:
-                    pred_data['detections'].append({
-                        'class': int(box.cls[0]),
-                        'confidence': float(box.conf[0]),
-                        'bbox': box.xyxy[0].tolist()
-                    })
+            for det in result.detections:
+                pred_data['detections'].append({
+                    'class': det.class_id,
+                    'confidence': det.confidence,
+                    'bbox': det.xyxy
+                })
             
             metrics['predictions'].append(pred_data)
         
@@ -175,3 +174,7 @@ class YOLOEvaluator:
         # This is a placeholder for visualization
         # Can be extended with confusion matrices, precision-recall curves, etc.
         pass
+
+
+# Backwards-compatible alias
+YOLOEvaluator = DetectorEvaluator

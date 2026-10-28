@@ -1,7 +1,13 @@
 # YOLO Training Configuration
 
 # Model settings
-model_size: 'm'  # Model size: n, s, m, l, x
+model_type: 'yolo'  # Backend: yolo | rfdetr
+model_size: 'm'     # yolo: n, s, m, l, x | rfdetr: nano, small, medium, base, large
+
+# Extra backend-specific args passed straight to the model's train() (optional)
+# train_args:
+#   lr: 0.0001          # rfdetr
+#   grad_accum_steps: 4 # rfdetr
 
 # Training parameters
 epochs: 100

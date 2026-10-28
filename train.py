@@ -1,5 +1,5 @@
 """
-Main training script for YOLO object detection
+Main training script for object detection (backend set by model_type in the training config)
 """
 
 import argparse
@@ -12,7 +12,7 @@ APP_DIR = Path(__file__).resolve().parent
 if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
-from src.training import YOLOTrainer
+from src.training import DetectorTrainer
 from utils import setup_seed, get_device
 
 
@@ -34,7 +34,7 @@ def main(args):
     device = get_device(use_cuda=args.use_cuda)
     
     print("=" * 50)
-    print("YOLO Object Detection Training")
+    print("Object Detection Training")
     print("=" * 50)
     print(f"Device: {device}")
     print(f"Config: {args.config}")
@@ -42,7 +42,7 @@ def main(args):
     print("=" * 50)
     
     # Initialize trainer
-    trainer = YOLOTrainer(config_path=args.config, log_dir=args.log_dir)
+    trainer = DetectorTrainer(config_path=args.config, log_dir=args.log_dir)
     
     # Train
     results = trainer.train(
@@ -78,7 +78,7 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Train YOLO object detection model'
+        description='Train object detection model'
     )
     
     # Data arguments

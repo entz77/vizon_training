@@ -2,10 +2,10 @@
 Example usage of the YOLO training framework
 """
 
-from src.models import YOLOModel
-from src.training import YOLOTrainer
-from src.inference import YOLOPredictor
-from src.evaluation import YOLOEvaluator
+from src.models import build_model
+from src.training import DetectorTrainer
+from src.inference import DetectorPredictor
+from src.evaluation import DetectorEvaluator
 from utils import setup_seed, get_device
 
 
@@ -20,7 +20,7 @@ def example_training():
     device = get_device()
     
     # Initialize trainer
-    trainer = YOLOTrainer(config_path='configs/training_config.yaml')
+    trainer = DetectorTrainer(config_path='configs/training_config.yaml')
     
     # Train (ensure dataset YAML exists)
     # results = trainer.train(
@@ -40,10 +40,10 @@ def example_inference():
     print("=" * 50)
     
     # Load model
-    model = YOLOModel(model_size='m')
+    model = build_model("yolo", "m")
     
     # Initialize predictor
-    predictor = YOLOPredictor(model, conf_threshold=0.5)
+    predictor = DetectorPredictor(model, conf_threshold=0.5)
     
     # Predict on image
     # results = predictor.predict_image('path/to/image.jpg')
@@ -59,11 +59,11 @@ def example_evaluation():
     print("=" * 50)
     
     # Load model
-    model = YOLOModel(model_size='m')
+    model = build_model("yolo", "m")
     model.load_weights('path/to/weights.pt')
     
     # Evaluate
-    evaluator = YOLOEvaluator(model)
+    evaluator = DetectorEvaluator(model)
     # results = evaluator.evaluate('path/to/test/images')
     # evaluator.save_results('eval_results.json')
     

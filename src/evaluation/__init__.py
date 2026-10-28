@@ -1,3 +1,3 @@
-from .evaluator import YOLOEvaluator
+from .evaluator import DetectorEvaluator, YOLOEvaluator
 
-__all__ = ['YOLOEvaluator']
+__all__ = ['DetectorEvaluator', 'YOLOEvaluator']

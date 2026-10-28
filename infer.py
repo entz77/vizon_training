@@ -1,5 +1,5 @@
 """
-Inference script for YOLO object detection
+Inference script for object detection
 """
 
 import argparse
@@ -11,8 +11,8 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from src.models import YOLOModel
-from src.inference import YOLOPredictor
+from src.models import build_model, available_models
+from src.inference import DetectorPredictor
 
 # Shared (not per-run, not per-repo) cache directory that GCS-sourced images are downloaded
 # into - lives outside this repo, at a fixed absolute path, so it's reachable from
@@ -76,12 +76,12 @@ def main(args):
     """Main inference function"""
     
     print("=" * 50)
-    print("YOLO Object Detection Inference")
+    print("Object Detection Inference")
     print("=" * 50)
     
     # Load model
     print(f"Loading model: {args.weights}")
-    model = YOLOModel(device=args.device)
+    model = build_model(args.model_type, args.model_size, device=args.device)
     model.load_weights(args.weights)
     
     # Load class ID mapping if provided
@@ -90,7 +90,7 @@ def main(args):
         model.load_class_id_map(args.class_id_map)
     
     # Initialize predictor
-    predictor = YOLOPredictor(
+    predictor = DetectorPredictor(
         model=model,
         conf_threshold=args.conf,
         iou_threshold=args.iou
@@ -153,9 +153,22 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
-        description='Run inference with YOLO model'
+        description='Run inference with a detection model'
     )
     
+    parser.add_argument(
+        '--model-type',
+        type=str,
+        default='yolo',
+        choices=available_models(),
+        help='Detection backend'
+    )
+    parser.add_argument(
+        '--model-size',
+        type=str,
+        default=None,
+        help="Model size/variant (backend default if omitted, e.g. 'm' for yolo, 'base' for rfdetr)"
+    )
     parser.add_argument(
         '--weights',
         type=str,

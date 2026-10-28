@@ -1,3 +1,3 @@
-from .trainer import YOLOTrainer
+from .trainer import DetectorTrainer, YOLOTrainer
 
-__all__ = ['YOLOTrainer']
+__all__ = ['DetectorTrainer', 'YOLOTrainer']

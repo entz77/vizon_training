@@ -31,6 +31,7 @@ setup(
     python_requires=">=3.8",
     install_requires=[
         "ultralytics>=8.3.0",
+        "rfdetr[train]>=1.11.2",
         "torch>=2.0.0",
         "torchvision>=0.15.0",
         "opencv-python>=4.8.0",

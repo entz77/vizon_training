@@ -1,8 +1,13 @@
-# Vizon - YOLO Object Detection Training Framework
+# Vizon - Object Detection Training Framework
 
 A Python framework for preparing datasets, training, evaluating, and running inference with
-Ultralytics YOLOv8 object detection models — including tooling to pull annotations and images
-directly from GCS.
+object detection models — including tooling to pull annotations and images directly from GCS.
+
+Models are pluggable backends behind a common `BaseDetector` interface (`src/models/`).
+Currently available: `yolo` (Ultralytics) and `rfdetr` (RF-DETR, requires `pip install rfdetr`).
+Select one with `model_type` / `model_size` in `configs/training_config.yaml`, or `--model-type` /
+`--model-size` in `infer.py` and `evaluate.py`. To add a backend, subclass `BaseDetector` in
+`src/models/<name>_model.py` and register it in `src/models/registry.py`.
 
 ## Table of Contents
 
@@ -448,9 +453,9 @@ python evaluate.py \
 
 ```python
 from src.models import YOLOModel
-from src.training import YOLOTrainer
-from src.inference import YOLOPredictor
-from src.evaluation import YOLOEvaluator
+from src.training import DetectorTrainer
+from src.inference import DetectorPredictor
+from src.evaluation import DetectorEvaluator
 from src.data import YOLODataset, create_dataloader
 from utils import setup_seed, get_device
 
@@ -467,17 +472,17 @@ predictions = model.predict(source='image.jpg', conf=0.5)
 model.export(format='onnx')   # also supports 'torchscript', 'tflite'
 ```
 
-**YOLOTrainer**
+**DetectorTrainer**
 ```python
-trainer = YOLOTrainer(config_path='configs/training_config.yaml')
+trainer = DetectorTrainer(config_path='configs/training_config.yaml')
 results = trainer.train(data_yaml='configs/dataset_config.yaml', epochs=100, batch_size=32)
 trainer.validate(data_yaml)
 trainer.log_metrics({'loss': 0.5})
 ```
 
-**YOLOPredictor**
+**DetectorPredictor**
 ```python
-predictor = YOLOPredictor(model, conf_threshold=0.5, iou_threshold=0.45)
+predictor = DetectorPredictor(model, conf_threshold=0.5, iou_threshold=0.45)
 results = predictor.predict_image('image.jpg')
 results = predictor.predict_batch(['img1.jpg', 'img2.jpg'])
 results = predictor.predict_video('video.mp4', output_path='out.mp4')
@@ -487,9 +492,9 @@ for det in results['detections']:
     print(f"{det['class_name']}: {det['confidence']:.2f}")
 ```
 
-**YOLOEvaluator**
+**DetectorEvaluator**
 ```python
-evaluator = YOLOEvaluator(model)
+evaluator = DetectorEvaluator(model)
 results = evaluator.evaluate('test_dir/', conf_threshold=0.5)
 metrics = evaluator.compute_metrics(predictions, ground_truths)
 ```
