@@ -13,6 +13,7 @@ if str(APP_DIR) not in sys.path:
     sys.path.insert(0, str(APP_DIR))
 
 from src.training import DetectorTrainer
+from src.evaluation import build_report
 from utils import setup_seed, get_device
 
 
@@ -76,6 +77,25 @@ def main(args):
         )
         print("Validation completed!")
     
+    # Backend-neutral metrics report (mAP, confusion matrix, PR/F1 curves)
+    if args.report:
+        best = Path(args.save_dir) / 'checkpoint_best_total.pth'  # rfdetr; yolo keeps best weights loaded
+        if trainer.model_type == 'rfdetr' and best.exists():
+            trainer.model.load_weights(best)
+        report_dir = Path(args.save_dir) / 'report'
+        print("\n" + "=" * 50)
+        print(f"Building report on '{args.report_split}' split -> {report_dir}")
+        print("=" * 50)
+        report = build_report(
+            trainer.model, args.data, split=args.report_split, out_dir=report_dir,
+            conf=args.report_conf, batch_size=args.batch_size,
+            num_samples=args.report_samples
+        )
+        print(f"mAP50-95: {report['map50_95']:.4f} | mAP50: {report['map50']:.4f} | "
+              f"best F1: {report['best_f1']:.3f} @ conf {report['best_f1_conf']:.2f}")
+        for w in report['warnings']:
+            print(f"WARNING: {w}")
+
     print("\n" + "=" * 50)
     print("Training Completed Successfully!")
     print("=" * 50)
@@ -214,8 +234,34 @@ if __name__ == '__main__':
         help='Run validation after training'
     )
     
+    parser.add_argument(
+        '--report',
+        action='store_true',
+        help='After training, write a metrics report (mAP, confusion matrix, PR/F1 curves) to <save-dir>/report'
+    )
+    parser.add_argument(
+        '--report-split',
+        type=str,
+        default='val',
+        choices=['train', 'val', 'test'],
+        help='Dataset split for --report'
+    )
+    parser.add_argument(
+        '--report-conf',
+        type=float,
+        default=0.25,
+        help='Confidence threshold for the report confusion matrix and per-class P/R/F1'
+    )
+
+    parser.add_argument(
+        '--report-samples',
+        type=int,
+        default=16,
+        help='Number of sample images (ground truth vs predictions) to save with --report, 0 to disable'
+    )
+
     args = parser.parse_args()
-    
+
     # Handle cuda flag
     if args.no_cuda:
         args.use_cuda = False
