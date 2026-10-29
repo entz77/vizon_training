@@ -1,5 +1,7 @@
 ultralytics>=8.3.0
 rfdetr[train]>=1.11.2
+# rfdetr -> vernier -> pyarrow; pyarrow 22+ requires NumPy 2 but numpy is pinned <2 below
+pyarrow>=15,<22
 opencv-python==4.8.0.74
 numpy>=1.26.4,<2
 pandas==2.0.3
