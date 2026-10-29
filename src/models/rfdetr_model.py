@@ -4,6 +4,7 @@ RF-DETR model wrapper (https://github.com/roboflow/rf-detr)
 
 import os
 import shutil
+import tempfile
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -118,25 +119,30 @@ class RFDETRModel(BaseDetector):
         Weights are written to `save_dir` (checkpoint_best_total.pth, ...).
         """
         save_dir = Path(save_dir)
-        dataset_dir, names = self._prepare_dataset(data_yaml, save_dir / 'rfdetr_dataset')
-        self.class_names = {int(k): v for k, v in dict(names).items()} if isinstance(names, dict) \
-            else dict(enumerate(names))
+        # Kept outside save_dir so the linked/copied images never end up in the run outputs
+        work_dir = Path(tempfile.mkdtemp(prefix='rfdetr_dataset_'))
+        try:
+            dataset_dir, names = self._prepare_dataset(data_yaml, work_dir / 'dataset')
+            self.class_names = {int(k): v for k, v in dict(names).items()} if isinstance(names, dict) \
+                else dict(enumerate(names))
 
-        train_args = dict(
-            dataset_dir=str(dataset_dir),
-            epochs=epochs,
-            batch_size=batch_size,
-            output_dir=str(save_dir),
-            early_stopping=patience is not None and patience > 0,
-            early_stopping_patience=patience,
-            device=device or self.device,
-        )
-        if resume:
-            last = save_dir / 'checkpoint.pth'
-            if last.exists():
-                train_args['resume'] = str(last)
-        train_args.update(kwargs)
-        return self.model.train(**train_args)
+            train_args = dict(
+                dataset_dir=str(dataset_dir),
+                epochs=epochs,
+                batch_size=batch_size,
+                output_dir=str(save_dir),
+                early_stopping=patience is not None and patience > 0,
+                early_stopping_patience=patience,
+                device=device or self.device,
+            )
+            if resume:
+                last = save_dir / 'checkpoint.pth'
+                if last.exists():
+                    train_args['resume'] = str(last)
+            train_args.update(kwargs)
+            return self.model.train(**train_args)
+        finally:
+            shutil.rmtree(work_dir, ignore_errors=True)
 
     def val(self, data_yaml, imgsz=640, batch_size=16, device=None):
         raise NotImplementedError(
