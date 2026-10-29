@@ -2,6 +2,7 @@
 RF-DETR model wrapper (https://github.com/roboflow/rf-detr)
 """
 
+import os
 import shutil
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -47,11 +48,25 @@ class RFDETRModel(BaseDetector):
         self.model = _model_class(self.model_size)(device=self.device)
 
     @staticmethod
+    def _link_tree(src_dir, dst_dir):
+        dst_dir.mkdir(parents=True)
+        for f in src_dir.rglob('*'):
+            if not f.is_file():
+                continue
+            dst = dst_dir / f.relative_to(src_dir)
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(f, dst)
+            except OSError:
+                shutil.copy2(f, dst)
+
+    @staticmethod
     def _prepare_dataset(data_yaml, out_dir):
         """
         RF-DETR expects <root>/{train,valid,test}/{images,labels} + data.yaml, while the
         project's datasets use Ultralytics' images/<split> + labels/<split> layout.
-        Build the expected layout out of symlinks.
+        Build the expected layout out of real directories holding hard links (copies if
+        linking fails): rfdetr rejects symlinks that resolve outside the dataset dir.
         """
         with open(data_yaml) as f:
             cfg = yaml.safe_load(f)
@@ -69,9 +84,9 @@ class RFDETRModel(BaseDetector):
                 if src_key == 'test':
                     continue
                 raise FileNotFoundError(f"{src_key} images not found: {img_dir}")
-            (out_dir / dst).mkdir(parents=True)
-            (out_dir / dst / 'images').symlink_to(img_dir, target_is_directory=True)
-            (out_dir / dst / 'labels').symlink_to(lbl_dir, target_is_directory=True)
+            RFDETRModel._link_tree(img_dir, out_dir / dst / 'images')
+            if lbl_dir.is_dir():
+                RFDETRModel._link_tree(lbl_dir, out_dir / dst / 'labels')
 
         names = cfg['names']
         with open(out_dir / 'data.yaml', 'w') as f:
