@@ -34,6 +34,9 @@ class RFDETRModel(BaseDetector):
 
     model_type = 'rfdetr'
     default_size = 'base'
+    # False: one model.predict() call per image (known good). True: one call per list of images,
+    # letting rfdetr batch internally. Off until benchmark_rfdetr_batching.py confirms it on a GPU.
+    batched_inference = False
 
     def __init__(self, model_size='base', device=None, class_id_map: Optional[Dict[int, int]] = None):
         """
@@ -149,20 +152,25 @@ class RFDETRModel(BaseDetector):
             "RF-DETR validates every epoch during train(); use evaluate.py for a separate run."
         )
 
-    def predict(self, source, conf=0.25, iou=0.45, imgsz=640, device=None, verbose=True) -> List[ImageDetections]:
+    def predict(self, source, conf=0.25, iou=0.45, imgsz=640, device=None, verbose=True,
+                batched=None) -> List[ImageDetections]:
         """
         Run inference on image path(s), a directory of images, or numpy frame(s) (BGR, as from cv2).
         `iou`/`imgsz` are ignored: RF-DETR is NMS-free with a fixed resolution.
+        `batched` overrides the class-level `batched_inference` switch.
         """
         images, paths = self._load_images(source)
         if not images:
             return []
 
-        out = []
-        for image, path in zip(images, paths):
-            dets = self.model.predict(image, threshold=conf)
-            out.append(self._to_image_detections(dets, path, image.size))
-        return out
+        if self.batched_inference if batched is None else batched:
+            dets_list = self.model.predict(images, threshold=conf)
+            if not isinstance(dets_list, list):
+                dets_list = [dets_list]
+        else:
+            dets_list = [self.model.predict(image, threshold=conf) for image in images]
+        return [self._to_image_detections(d, path, image.size)
+                for d, path, image in zip(dets_list, paths, images)]
 
     @staticmethod
     def _load_images(source):
@@ -204,6 +212,17 @@ class RFDETRModel(BaseDetector):
                 x1=float(x1), y1=float(y1), x2=float(x2), y2=float(y2),
             ))
         return ImageDetections(image_path=path, image_shape=(height, width), detections=detections)
+
+    def optimize_for_inference(self, dtype='float32', compile=False, batch_size=1):
+        """
+        Optionally cast to `dtype` (e.g. 'float16' on GPU) and/or compile for inference.
+        compile=True fixes the batch size: predict() then rejects any other batch size.
+        Undo with remove_optimization().
+        """
+        self.model.inference(compile=compile, batch_size=batch_size, dtype=dtype)
+
+    def remove_optimization(self):
+        self.model.remove_optimized_model()
 
     def export(self, format='onnx', half=False):
         if format != 'onnx':
