@@ -72,6 +72,48 @@ def download_gcs_images(gcs_uris, dest_dir):
     return downloaded
 
 
+IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'}
+
+
+def predict_folder(predictor, source, output, results_json, batch_size):
+    """
+    Run inference on every image under `source` (recursive), `batch_size` images per model call.
+
+    Writes one JSON with all detections (`results_json`, default: `<output>/results.json` if
+    `output` is given, else `<source>_results.json` next to the folder) and, when `output` is
+    given, an annotated copy of every image there (sub-folders preserved).
+    """
+    source = Path(source)
+    images = sorted(p for p in source.rglob('*') if p.suffix.lower() in IMAGE_EXTENSIONS)
+    if not images:
+        raise SystemExit(f"No images found in {source}")
+    print(f"Predicting on {len(images)} image(s) in {source} (batch size {batch_size})")
+
+    records = []
+    for i in tqdm(range(0, len(images), batch_size), desc="Predicting", unit="batch"):
+        chunk = images[i:i + batch_size]
+        for path, results in zip(chunk, predictor.predict_batch([str(p) for p in chunk], verbose=False)):
+            records.append({**results, 'image_path': str(path)})
+            if output:
+                predictor.save_annotated(path, results, Path(output) / path.relative_to(source))
+
+    if results_json:
+        json_path = Path(results_json)
+    elif output:
+        json_path = Path(output) / 'results.json'
+    else:
+        json_path = source.parent / f"{source.name}_results.json"
+    json_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(json_path, 'w') as f:
+        json.dump(records, f, indent=2)
+
+    total = sum(len(r['detections']) for r in records)
+    print(f"{total} detection(s) in {len(records)} image(s)")
+    print(f"Results written to: {json_path}")
+    if output:
+        print(f"Annotated images saved to: {output}")
+
+
 def main(args):
     """Main inference function"""
     
@@ -97,13 +139,20 @@ def main(args):
     )
     
     # Run inference based on source type
-    if args.mode == 'image':
+    if args.mode == 'image' and Path(args.source).is_dir():
+        predict_folder(predictor, args.source, args.output, args.results_json, args.batch_size)
+
+    elif args.mode == 'image':
         print(f"Predicting on image: {args.source}")
         results = predictor.predict_image(args.source)
         print(f"Detections: {len(results['detections'])}")
         
         for det in results['detections']:
             print(f"  - Class ID: {det['class_id']}, {det['class_name']}, Confidence: {det['confidence']:.2f}")
+
+        if args.output:
+            saved = predictor.save_annotated(args.source, results, args.output)
+            print(f"Annotated image saved to: {saved}")
     
     elif args.mode == 'video':
         print(f"Predicting on video: {args.source}")
@@ -192,7 +241,19 @@ if __name__ == '__main__':
         '--output',
         type=str,
         default=None,
-        help='Output path for video/webcam mode'
+        help='Output path: annotated image (file or folder) in image mode, folder for annotated images when --source is a folder, video in video/webcam mode, JSON in gcs_images mode'
+    )
+    parser.add_argument(
+        '--results-json',
+        type=str,
+        default=None,
+        help='JSON path for detections when --source is a folder (default: <output>/results.json, or <source>_results.json)'
+    )
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=8,
+        help='Images per model call when --source is a folder'
     )
     parser.add_argument(
         '--conf',

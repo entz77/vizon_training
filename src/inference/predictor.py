@@ -52,12 +52,13 @@ class DetectorPredictor:
 
         return self._format_results(results[0])
     
-    def predict_batch(self, image_paths: List[str]):
+    def predict_batch(self, image_paths: List[str], verbose: bool = True):
         """
         Predict on multiple images.
         
         Args:
             image_paths (list): List of image paths
+            verbose (bool): Print per-image inference logs
         
         Returns:
             list: List of predictions
@@ -65,7 +66,8 @@ class DetectorPredictor:
         results = self.model.predict(
             source=image_paths,
             conf=self.conf_threshold,
-            iou=self.iou_threshold
+            iou=self.iou_threshold,
+            verbose=verbose
         )
         
         return [self._format_results(r) for r in results]
@@ -249,6 +251,28 @@ class DetectorPredictor:
         self.class_id_map = load_class_id_map_from_yaml(Path(yaml_path))
         return self.class_id_map
     
+    def save_annotated(self, image_path, predictions, output_path):
+        """
+        Draw `predictions` (as returned by predict_image) on the image and save it.
+
+        Args:
+            image_path (str): Source image
+            predictions (dict): Result of predict_image
+            output_path (str): Output file, or a directory (the source file name is reused)
+
+        Returns:
+            Path: Where the image was written
+        """
+        out = Path(output_path)
+        if out.is_dir() or not out.suffix:
+            out = out / Path(image_path).name
+        out.parent.mkdir(parents=True, exist_ok=True)
+        frame = cv2.imread(str(image_path))
+        if frame is None:
+            raise FileNotFoundError(f"Could not read image: {image_path}")
+        cv2.imwrite(str(out), self._draw_boxes(frame, predictions))
+        return out
+
     @staticmethod
     def _draw_boxes(frame, predictions, thickness=2, font_scale=0.6):
         """

@@ -381,10 +381,20 @@ view is generated automatically next to the run folder (`runs/<save-dir>_dataset
 yolo / `base` for rfdetr; must match the size the weights were trained with). RF-DETR is NMS-free,
 so `--iou` has no effect with it.
 
-**Single image or a folder of images** (`--mode image`):
+**Single image** (`--mode image`). Add `--output out/` (folder) or `--output out/result.jpg` to also save
+the image with boxes drawn:
 ```bash
 python infer.py --weights runs/detect/train/weights/best.pt --source path/to/image.jpg --mode image
+```
+
+**Folder of images** (`--mode image` with a directory as `--source`; searched recursively, `--batch-size`
+images per model call, default 8). All detections go into one JSON: `--results-json`, else
+`<output>/results.json` when `--output` is given, else `<folder>_results.json` next to the folder.
+With `--output out/`, an annotated copy of every image is saved there (sub-folders preserved):
+```bash
 python infer.py --weights runs/detect/train/weights/best.pt --source path/to/image_folder/ --mode image
+python infer.py --model-type rfdetr --model-size base --weights models/rfdetr_base.pth \
+    --source path/to/image_folder/ --mode image --output out/ --batch-size 8
 ```
 
 **Video** (`--mode video`):
