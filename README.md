@@ -173,7 +173,9 @@ to/from GCS; nothing is downloaded locally.
 python src/data/preprocessing.py \
     --source-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7/labels \
     --output-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7_split
+```
 
+```bash
 # Train/val/test split (70/20/10), custom images source and seed
 python src/data/preprocessing.py \
     --source-dir gs://dev-vveesee-ml-training/vizon-training/datasets/rtd_v7/labels \
@@ -474,6 +476,78 @@ Add `--model-type rfdetr --model-size base` (and an RF-DETR checkpoint for `--we
 an RF-DETR model. For mAP against ground-truth labels, use `model.val(data_yaml)` (see the API
 reference): YOLO returns Ultralytics' metrics; RF-DETR returns `map`, `map50`, `map75`,
 `per_class_map` and `num_images` for the `val` split (pass `split='test'` for the test split).
+
+### Lensabonus scheduled inference (Cloud SQL -> local detection)
+
+`lensabonus_inference_pipeline.py` mirrors the pipeline of the same name in `vizon_classifier_embedding`,
+but runs this repo's detector (YOLO or RF-DETR) instead of a crop classifier:
+
+1. Queries Cloud SQL (`transactions.user_activity`, `capture_annotate` rows) for a time window.
+2. Downloads each image into the shared folder `/home/enitze/projects/repos/vizon/shared_image_folder`
+   (same folder and `<row id>_<upload ts>_<filename>` naming as the embedding repo, so already-downloaded
+   images are reused and never fetched twice).
+3. Runs the detector locally, in batches.
+4. Writes `infer/scheduled_runs/<timestamp>/{results.json,labels/*.txt,categories.json}`.
+5. Writes lensabonus-format annotation files (`{"model_name", "model_predictions": [{"class_id", "box": {left,top,right,bottom}}]}`,
+   normalized) to `infer/annotations/<model name>/`. These are the hand-off to `vizon_classifier_embedding`:
+   run its `lensabonus_inference_pipeline.py` with `--annotations-cache-dir <that folder>` and it crops and
+   classifies *this detector's* boxes instead of lensabonus's (it finds them by the same `<row id>_*_<name>`
+   glob, so no GCS annotation download happens). `--classes` there then refers to this model's class ids.
+6. Only with `--write-class-map` (opt-in): upserts this model's class map into `labeling.class_maps`
+   (`map_id` = `--model-name`, `{"0": "name", ...}`). This is the only thing written to the database; no
+   `labeling.labels` rows are written here. The embedding pipeline writes the raw-detection `labels` rows
+   (with `class_map` = the annotations' `model_name`) but never writes a class map for that name, it only
+   reads it, so without this step those rows point at a map that doesn't exist and
+   `box_labels.object_class_map_class` stays `NULL`. Run it once per model (it is an idempotent upsert).
+   The Objects tab shows only the latest `objects` row per image (by `created_at`), so a newer AI row hides
+   an older human-labeled one.
+
+```bash
+# last 24 h on dev (default window)
+python lensabonus_inference_pipeline.py --weights models/rfdetr/rtd_rfdetr_v1/checkpoint_best_total.pth \
+    --model-type rfdetr --model-size base --model-name rtd_rfdetr_v1
+```
+
+```bash
+# explicit window and confidence threshold
+python lensabonus_inference_pipeline.py --weights models/registered/rfdetr/trf_rtd_v1/rfdetr-base-DETECTION-20261029-092746_model_runs_checkpoint_best_total.pth \
+    --model-type rfdetr --model-size base --model-name trf_rtd_v1 \
+    --start-ts 2026-06-17T00:00:00 --end-ts 2026-07-31T00:00:00 --conf 0.4
+```
+
+```bash
+# once per trained model: write its class map to labeling.class_maps (production)
+python lensabonus_inference_pipeline.py --weights models/rfdetr/rtd_rfdetr_v1/checkpoint_best_total.pth \
+    --model-type rfdetr --model-size base --model-name rtd_rfdetr_v1 --write-class-map --env prd
+```
+
+For a YOLO model use `--model-type yolo` (the default) with its `best.pt`, e.g.
+`--weights models/yolo/rtd_yolo_v3/best.pt --model-name rtd_yolo_v3`; `--model-size` then defaults to `m`.
+
+**Arguments**
+
+| Argument | Required | Default | Description |
+|---|---|---|---|
+| `--weights` | yes | - | Path to the trained detector weights (`best.pt` for YOLO, `checkpoint_best_total.pth` for RF-DETR). |
+| `--model-type` | no | `yolo` | Detector backend: `yolo` or `rfdetr` (any registered backend). |
+| `--model-size` | no | backend default (`m` / `base`) | Model size; must match what the weights were trained with. |
+| `--model-name` | no | `<model-type>_<weights file name>` | Stable identifier for this trained model, e.g. `rtd_yolo_v3`. Becomes the annotation files' `model_name` (-> `agent`/`class_map` in `labeling.labels` via the embedding pipeline), the default annotations folder name and the `--write-class-map` map id. The default is **not unique across trainings** (every YOLO run saves `best.pt`), so set it explicitly; a warning is printed when it is omitted. |
+| `--device` | no | auto | `cpu` or `cuda`. |
+| `--class-id-map` | no | none | YAML class-id mapping applied to the predictions. |
+| `--conf` | no | `0.5` | Confidence threshold. |
+| `--iou` | no | `0.45` | NMS IoU threshold. YOLO only; RF-DETR is NMS-free and ignores it. |
+| `--batch-size` | no | `8` | Images per model call. |
+| `--start-ts` | no | 24 h before `--end-ts` | ISO datetime, inclusive lower bound on the row's `created_at`. |
+| `--end-ts` | no | now | ISO datetime, inclusive upper bound. |
+| `--env` | no | `dev` | `dev` or `prd`: selects the Cloud SQL instance and the `<env>-vveesee-edge-submit` bucket. |
+| `--images-cache-dir` | no | `/home/enitze/projects/repos/vizon/shared_image_folder` | Shared image folder (also used by `vizon_classifier_embedding`); images already there are not re-downloaded. |
+| `--output-base-dir` | no | `infer/scheduled_runs` | Base folder; each run writes into a `<UTC timestamp>` sub-folder. |
+| `--annotations-dir` | no | `infer/annotations/<model name>` | Where the lensabonus-format annotation files are written (point the embedding pipeline's `--annotations-cache-dir` here). |
+| `--write-class-map` | no | off | Upsert the model's class map into `labeling.class_maps` (`map_id` = model name). Writes nothing else to the database. |
+
+Needs ADC credentials (`gcloud auth application-default login`) with Secret Manager access to
+`dev_pg_db` / `prd_pg_db` and read access to the `<env>-vveesee-edge-submit` bucket. RF-DETR runs with
+Hugging Face offline mode forced on, so no Hugging Face calls are made.
 
 ## Notebooks
 

@@ -14,6 +14,15 @@ from PIL import Image
 
 from .base import BaseDetector, Detection, ImageDetections
 
+# Never talk to Hugging Face. RF-DETR only needs the hub to fetch the DINOv2 backbone when it is
+# built WITHOUT pretrain_weights; we always pass weights (the cached rf-detr-<size>.pth or a
+# fine-tuned checkpoint), which already contain the backbone. Offline mode turns any stray hub
+# lookup into a local-cache-only lookup/error instead of an outbound request that would carry
+# an HF token. setdefault so an explicit override still works. Must be set before
+# transformers/huggingface_hub are imported (they read these at import time).
+for _var, _val in (('HF_HUB_OFFLINE', '1'), ('TRANSFORMERS_OFFLINE', '1'), ('HF_HUB_DISABLE_TELEMETRY', '1')):
+    os.environ.setdefault(_var, _val)
+
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp'}
 SIZES = ('nano', 'small', 'medium', 'base', 'large')
 
@@ -193,6 +202,10 @@ class RFDETRModel(BaseDetector):
                 images.append(Image.open(item).convert('RGB'))
                 paths.append(str(item))
         return images, paths
+
+    def get_class_names(self):
+        names = self.class_names or getattr(self.model, 'class_names', None) or {}
+        return {int(k): str(v) for k, v in (names.items() if isinstance(names, dict) else enumerate(names))}
 
     def _name(self, class_id):
         names = self.class_names

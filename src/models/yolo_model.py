@@ -165,6 +165,10 @@ class YOLOModel(BaseDetector):
         """
         return self.model.export(format=format, half=half)
     
+    def get_class_names(self):
+        names = getattr(self.model, 'names', None) or {}
+        return {int(k): str(v) for k, v in (names.items() if isinstance(names, dict) else enumerate(names))}
+
     def load_weights(self, weights_path):
         """
         Load pretrained weights.

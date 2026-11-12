@@ -11,3 +11,4 @@ runs/
 venv
 .vscode/
 /models/
+infer/scheduled_runs/

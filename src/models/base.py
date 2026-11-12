@@ -95,6 +95,10 @@ class BaseDetector(ABC):
         self.class_id_map = load_class_id_map_from_yaml(Path(yaml_path))
         return self.class_id_map
 
+    def get_class_names(self) -> Dict[int, str]:
+        """{class_id: class_name} the loaded model predicts (native ids, before any class_id_map). Backends override."""
+        return {}
+
     def get_model_info(self):
         """Get model information"""
         return {
