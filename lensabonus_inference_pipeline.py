@@ -45,6 +45,7 @@ DEFAULT_IMAGES_CACHE_DIR = "/home/enitze/projects/repos/vizon/shared_image_folde
 DEFAULT_ANNOTATIONS_BASE_DIR = "infer/annotations"
 IMAGES_BASE_PATH = {"dev": "gs://dev-vveesee-edge-submit", "prd": "gs://prd-vveesee-edge-submit"}
 IMAGES_GCS_SUBFOLDER = "images"
+BOX_DECIMALS = 4  # max decimal digits of the normalized box coordinates in the annotation files
 
 ACTIVITY_LIST_QUERY = """
     SELECT id, data
@@ -166,7 +167,7 @@ def write_lensabonus_annotations(records: List[dict], annotations_dir: Path, mod
 
         {"model_name": ..., "model_predictions": [{"class_id": 0, "box": {left, top, right, bottom}}]}
 
-    Boxes are normalized (0-1). Files are named "<image stem>.json" = "{row_id}_{upload_ts}_{stem}.json",
+    Boxes are normalized (0-1), rounded to BOX_DECIMALS (4) decimal digits. Files are named "<image stem>.json" = "{row_id}_{upload_ts}_{stem}.json",
     which is exactly what that pipeline's find_cached_activity_file globs for ("{row_id}_*_{filename}",
     filename being the row's annotations filename, which shares the image's stem) - so pointing its
     --annotations-cache-dir here makes it skip the GCS annotation download and use these.
@@ -178,8 +179,10 @@ def write_lensabonus_annotations(records: List[dict], annotations_dir: Path, mod
             {
                 "class_id": d["class_id"],
                 "box": {
-                    "left": max(0.0, d["bbox"]["x1"] / w), "top": max(0.0, d["bbox"]["y1"] / h),
-                    "right": min(1.0, d["bbox"]["x2"] / w), "bottom": min(1.0, d["bbox"]["y2"] / h),
+                    "left": round(max(0.0, d["bbox"]["x1"] / w), BOX_DECIMALS),
+                    "top": round(max(0.0, d["bbox"]["y1"] / h), BOX_DECIMALS),
+                    "right": round(min(1.0, d["bbox"]["x2"] / w), BOX_DECIMALS),
+                    "bottom": round(min(1.0, d["bbox"]["y2"] / h), BOX_DECIMALS),
                 },
             }
             for d in rec["detections"]

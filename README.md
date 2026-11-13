@@ -489,7 +489,7 @@ but runs this repo's detector (YOLO or RF-DETR) instead of a crop classifier:
 3. Runs the detector locally, in batches.
 4. Writes `infer/scheduled_runs/<timestamp>/{results.json,labels/*.txt,categories.json}`.
 5. Writes lensabonus-format annotation files (`{"model_name", "model_predictions": [{"class_id", "box": {left,top,right,bottom}}]}`,
-   normalized) to `infer/annotations/<model name>/`. These are the hand-off to `vizon_classifier_embedding`:
+   normalized, at most 4 decimal digits) to `infer/annotations/<model name>/`. These are the hand-off to `vizon_classifier_embedding`:
    run its `lensabonus_inference_pipeline.py` with `--annotations-cache-dir <that folder>` and it crops and
    classifies *this detector's* boxes instead of lensabonus's (it finds them by the same `<row id>_*_<name>`
    glob, so no GCS annotation download happens). `--classes` there then refers to this model's class ids.
