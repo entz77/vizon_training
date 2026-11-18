@@ -10,7 +10,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import yaml
-from PIL import Image
+from PIL import Image, ImageOps
 
 from .base import BaseDetector, Detection, ImageDetections
 
@@ -196,10 +196,12 @@ class RFDETRModel(BaseDetector):
                 images.append(Image.fromarray(item[..., ::-1]))  # BGR -> RGB
                 paths.append(None)
             elif isinstance(item, Image.Image):
-                images.append(item.convert('RGB'))
+                images.append(ImageOps.exif_transpose(item).convert('RGB'))
                 paths.append(None)
             else:
-                images.append(Image.open(item).convert('RGB'))
+                # Apply EXIF orientation (phone photos are often stored sideways with a rotate tag),
+                # so the model sees the image upright - same as cv2.imread in save_annotated.
+                images.append(ImageOps.exif_transpose(Image.open(item)).convert('RGB'))
                 paths.append(str(item))
         return images, paths
 
