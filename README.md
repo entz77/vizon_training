@@ -22,6 +22,7 @@ Select one with `model_type` / `model_size` in `configs/training_config.yaml`, o
    - [6. Run Inference](#6-run-inference)
    - [7. Remap Class IDs at Inference Time](#7-remap-class-ids-at-inference-time)
    - [8. Evaluate](#8-evaluate)
+   - [9. Preprocess Images (perspective rectification)](#9-preprocess-images-perspective-rectification)
 4. [Notebooks](#notebooks)
 5. [Python API Reference](#python-api-reference)
 6. [Configuration Reference](#configuration-reference)
@@ -50,7 +51,8 @@ vizon_training/
 │   ├── evaluation/
 │   │   ├── evaluator.py               # Metrics (precision/recall/F1, IoU)
 │   │   └── split_metrics.py           # Backend-independent mAP on a dataset split
-│   └── inference/predictor.py       # Unified image/batch/video/webcam inference
+│   ├── inference/predictor.py       # Unified image/batch/video/webcam inference
+│   └── preprocessing/perspective.py # Perspective rectification from detected box rows
 ├── configs/
 │   ├── training_config.yaml           # Training hyperparameters
 │   ├── dataset_config.yaml            # Dataset paths + class names
@@ -63,6 +65,7 @@ vizon_training/
 ├── train.py                         # Training entry point
 ├── infer.py                         # Inference entry point (image/video/webcam/GCS)
 ├── evaluate.py                      # Evaluation entry point
+├── preprocess.py                    # Image preprocessor (perspective rectification, ...)
 ├── prepare_dataset.py               # Label Studio (GCS) → versioned GCS dataset
 ├── convert_xywhr_to_xywh.py         # CLI wrapper for rotated → axis-aligned boxes
 ├── convert_class_id_to_zero.py      # CLI wrapper to collapse all classes to id 0
@@ -548,6 +551,65 @@ For a YOLO model use `--model-type yolo` (the default) with its `best.pt`, e.g.
 Needs ADC credentials (`gcloud auth application-default login`) with Secret Manager access to
 `dev_pg_db` / `prd_pg_db` and read access to the `<env>-vveesee-edge-submit` bucket. RF-DETR runs with
 Hugging Face offline mode forced on, so no Hugging Face calls are made.
+
+### 9. Preprocess Images (perspective rectification)
+
+`preprocess.py` runs a chain of preprocessing steps (`--steps`) on an image or a folder of images.
+Currently available:
+
+- **`perspective`**: detects boxes with the selected model, fits one regression line per row of
+  boxes through each box's anchor point (`--anchor bottom|center|top`), and compares how far
+  apart the outer lines are at the left and right image edges. The side where they converge
+  (the side farther from the camera) is stretched with a homography so the rows become parallel
+  and horizontal.
+
+```bash
+# Single image, YOLO model, lines through box bottoms, with debug overlays
+python preprocess.py \
+    --weights runs/detect/train/weights/best.pt \
+    --source path/to/image.jpg \
+    --output runs/preprocess/ \
+    --anchor bottom \
+    --debug
+
+# Whole folder (recursive) with an RF-DETR model on GPU, lines through box centers
+python preprocess.py \
+    --model-type rfdetr --model-size base \
+    --weights models/rfdetr_base.pth \
+    --source path/to/image_folder/ \
+    --output runs/preprocess/ \
+    --anchor center \
+    --conf 0.4 \
+    --device cuda \
+    --batch-size 16 \
+    --debug
+```
+
+Outputs in `--output`:
+
+| Path | Contents |
+|------|----------|
+| `<name>.<ext>` | Preprocessed image (sub-folders of `--source` are preserved) |
+| `debug/<name>.<ext>` | With `--debug`: boxes, anchors, one colored regression line per row and the verdict, drawn on the original |
+| `preprocess.json` | Per image: detections, and under `perspective` the convergence side, stretch ratio, vanishing point, homography, whether it was applied, and the boxes mapped into the rectified image |
+
+The CLI also prints a summary such as `Perspective: left: 12, not corrected: 5, right: 31`
+(images whose rows are already parallel count as `not corrected`).
+
+Perspective flags:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--anchor` | `bottom` | Box point the row lines go through: `bottom`, `center` or `top` |
+| `--min-boxes-per-row` | `3` | Rows with fewer boxes are ignored |
+| `--row-tolerance` | `0.5` | How far (in median box heights) a box may be from a row's line and still join it |
+| `--min-stretch-ratio` | `1.03` | Near/far spread ratio below which the image is left as is (`converges_to: none`) |
+| `--max-stretch-ratio` | `3.0` | Ratio above which the fit is distrusted and the image is left as is |
+
+Model flags (`--model-type`, `--model-size`, `--weights`, `--class-id-map`, `--conf`, `--iou`,
+`--device`, `--batch-size`) work as in `infer.py`. An image is not corrected when fewer than two
+rows qualify, the stretch ratio is outside the min/max range, or the outer rows are too close
+together; the reason is recorded in `preprocess.json`.
 
 ## Notebooks
 
