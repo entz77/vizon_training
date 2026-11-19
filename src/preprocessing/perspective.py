@@ -8,10 +8,13 @@ point on the side of the image that is farther from the camera. We:
   1. take one anchor point per box (bottom / center / top of the box, horizontally centered),
   2. group the anchors into rows,
   3. fit a regression line y = slope * x + intercept per row,
-  4. compare the vertical spread of the lines at the left vs. right image edge - the side where
-     they are closer together is the side the image converges to (the far side), and is the
-     side that must be stretched,
-  5. build a homography that maps the outermost lines to horizontal lines, keeping the spacing of
+  4. drop rows whose slope is an outlier: rows converging to one vanishing point have a slope
+     that is linear in their height, so a robust slope-vs-height fit flags rows that don't share
+     the vanishing point; the fit over the remaining rows is the perspective model,
+  5. take the model's lines at the top-most and bottom-most kept row and compare their vertical
+     spread at the left vs. right image edge - the side where they are closer together is the
+     side the image converges to (the far side), and is the side that must be stretched,
+  6. build a homography that maps those two lines to horizontal lines, keeping the spacing of
      the near side and stretching the far side to match.
 """
 
@@ -40,7 +43,11 @@ class RowLine:
 class PerspectiveAnalysis:
     image_shape: Tuple[int, int]                 # (height, width)
     anchor: str
-    lines: List[RowLine] = field(default_factory=list)
+    lines: List[RowLine] = field(default_factory=list)            # rows used for the correction
+    rejected_lines: List[RowLine] = field(default_factory=list)   # rows dropped as slope outliers
+    # slope of a row as a linear function of its height at the image centre:
+    # slope = a * y_mid + b (exact for rows converging to one vanishing point)
+    slope_model: Optional[Tuple[float, float]] = None
     # 'left' / 'right': the side the lines converge towards (= the side to stretch);
     # 'none': lines are (close to) parallel; None: not enough rows to decide.
     converges_to: Optional[str] = None
@@ -90,6 +97,9 @@ def group_into_rows(boxes: np.ndarray, anchor='bottom', row_tolerance=0.5) -> Li
     anchors = np.array([box_anchor(*b, anchor=anchor) for b in boxes])
     heights = boxes[:, 3] - boxes[:, 1]
     tol = row_tolerance * float(np.median(heights))
+    # Only trust a row's own tilt once its members span at least one box width horizontally;
+    # boxes stacked at (almost) the same x would otherwise yield a near-vertical "row".
+    min_span = float(np.median(boxes[:, 2] - boxes[:, 0]))
 
     rows: List[List[int]] = []
     for i in np.argsort(anchors[:, 0]):
@@ -97,7 +107,7 @@ def group_into_rows(boxes: np.ndarray, anchor='bottom', row_tolerance=0.5) -> Li
         best, best_dist = None, tol
         for r, members in enumerate(rows):
             pts = anchors[members]
-            if len(members) >= 2 and np.ptp(pts[:, 0]) > 1e-6:
+            if len(members) >= 2 and np.ptp(pts[:, 0]) >= min_span:
                 slope, intercept = np.polyfit(pts[:, 0], pts[:, 1], 1)
                 pred = slope * x + intercept
             else:
@@ -143,6 +153,43 @@ def vanishing_point(lines: Sequence[RowLine]) -> Optional[Tuple[float, float]]:
     return float(x), float(y)
 
 
+def fit_slope_model(lines: Sequence[RowLine], x_ref: float, slope_tolerance=0.03):
+    """
+    Robustly fit slope = a * y_ref + b over the row lines, with y_ref = line height at x_ref.
+
+    Rows that converge to one vanishing point (vx, vy) satisfy this exactly, with
+    a = 1 / (x_ref - vx) and b = -vy * a - so a row whose slope is far from the trend of the
+    others doesn't go through the common vanishing point and is an outlier (mis-grouped boxes,
+    a row mixing two shelves, too few boxes for a stable fit, ...).
+
+    Every pair of lines proposes a model; the one with the most inliers (|slope - model| <=
+    slope_tolerance) wins, ties broken by the inliers' total box count. The model is then refit
+    on the inliers by least squares weighted by box count.
+
+    Returns:
+        (a, b), inlier mask (bool array, same order as `lines`)
+    """
+    y = np.array([l.y_at(x_ref) for l in lines], dtype=float)
+    s = np.array([l.slope for l in lines], dtype=float)
+    n = np.array([len(l.box_indices) for l in lines], dtype=float)
+
+    best, best_score = np.ones(len(lines), bool), (-1, -1.0)
+    for i in range(len(lines)):
+        for j in range(i + 1, len(lines)):
+            if abs(y[j] - y[i]) < 1e-6:
+                continue
+            a = (s[j] - s[i]) / (y[j] - y[i])
+            b = s[i] - a * y[i]
+            inl = np.abs(s - (a * y + b)) <= slope_tolerance
+            inl[[i, j]] = True
+            score = (int(inl.sum()), float(n[inl].sum()))
+            if score > best_score:
+                best, best_score = inl, score
+
+    a, b = np.polyfit(y[best], s[best], 1, w=np.sqrt(n[best])) if best.sum() >= 2 else (0.0, s.mean())
+    return (float(a), float(b)), best
+
+
 # --------------------------------------------------------------------------------------------
 # Analysis + rectification
 # --------------------------------------------------------------------------------------------
@@ -156,6 +203,8 @@ def analyze_perspective(
     min_stretch_ratio=1.03,
     max_stretch_ratio=3.0,
     min_line_gap_frac=0.1,
+    max_row_slope=0.5,
+    slope_tolerance=0.03,
 ) -> PerspectiveAnalysis:
     """
     Work out which side of the image the rows converge to and the homography that fixes it.
@@ -170,6 +219,10 @@ def analyze_perspective(
         max_stretch_ratio: refuse to correct beyond this (usually a bad row fit)
         min_line_gap_frac: the outer two lines must be at least this fraction of the image
             height apart, otherwise the spread estimate is too noisy to trust
+        max_row_slope: rows steeper than this (|dy/dx|) are dropped as mis-grouped - a shelf
+            row is never close to vertical
+        slope_tolerance: rows whose slope is further than this from the slope-vs-height trend
+            of the other rows are dropped (see fit_slope_model)
     """
     h, w = image_shape
     result = PerspectiveAnalysis(image_shape=(int(h), int(w)), anchor=anchor)
@@ -180,18 +233,33 @@ def analyze_perspective(
 
     anchors = np.array([box_anchor(*b, anchor=anchor) for b in boxes])
     rows = [r for r in group_into_rows(boxes, anchor, row_tolerance) if len(r) >= min_boxes_per_row]
-    lines = [l for l in (fit_row_line(anchors, r) for r in rows) if l is not None]
+    lines = [l for l in (fit_row_line(anchors, r) for r in rows)
+             if l is not None and abs(l.slope) <= max_row_slope]
     lines.sort(key=lambda l: l.y_at(w / 2))
     result.lines = lines
     if len(lines) < 2:
         result.reason = f'need >= 2 rows with >= {min_boxes_per_row} boxes, found {len(lines)}'
         return result
 
-    top, bottom = lines[0], lines[-1]
+    # Drop rows whose slope breaks the common-vanishing-point trend, then describe the remaining
+    # rows by one slope model so all of them (not just the outer two) shape the correction.
+    xc = w / 2
+    (a, b), inliers = fit_slope_model(lines, xc, slope_tolerance)
+    result.lines = [l for l, k in zip(lines, inliers) if k]
+    result.rejected_lines = [l for l, k in zip(lines, inliers) if not k]
+    result.slope_model = (a, b)
+    if abs(a) > 1e-12:
+        result.vanishing_point = (float(xc - 1 / a), float(-b / a))
+
+    def model_line(y_mid):
+        slope = a * y_mid + b
+        return RowLine(float(slope), float(y_mid - slope * xc), [], 0.0)
+
+    y_mids = [l.y_at(xc) for l in result.lines]
+    top, bottom = model_line(min(y_mids)), model_line(max(y_mids))
     spread_left = float(bottom.y_at(0) - top.y_at(0))
     spread_right = float(bottom.y_at(w) - top.y_at(w))
     result.spread_left, result.spread_right = spread_left, spread_right
-    result.vanishing_point = vanishing_point(lines)
 
     if min(spread_left, spread_right) < min_line_gap_frac * h:
         result.reason = 'outer rows too close together (or crossing) to estimate perspective'
@@ -266,10 +334,15 @@ def draw_analysis(image: np.ndarray, boxes, analysis: PerspectiveAnalysis) -> np
     for r, line in enumerate(analysis.lines):
         color = palette[r % len(palette)]
         cv2.line(out, (0, int(round(line.y_at(0)))), (w, int(round(line.y_at(w)))), color, 2)
+    for line in analysis.rejected_lines:  # slope outliers: thin grey
+        cv2.line(out, (0, int(round(line.y_at(0)))), (w, int(round(line.y_at(w)))),
+                 (128, 128, 128), 1)
 
     label = f"converges: {analysis.converges_to}"
     if analysis.stretch_ratio:
         label += f"  stretch x{analysis.stretch_ratio:.2f}"
+    if analysis.rejected_lines:
+        label += f"  rejected {len(analysis.rejected_lines)} row(s)"
     if analysis.reason:
         label += f"  ({analysis.reason})"
     scale = max(0.5, w / 1600)
