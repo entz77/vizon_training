@@ -16,6 +16,12 @@ point on the side of the image that is farther from the camera. We:
      side the image converges to (the far side), and is the side that must be stretched,
   6. build a homography that maps those two lines to horizontal lines, keeping the spacing of
      the near side and stretching the far side to match.
+
+Horizontal counterpart (analyze_shelf_edges): when the camera is tilted up / down, the shelf
+unit's left and right sides converge towards the top or bottom. Each shelf box's left end (x1)
+and right end (x2) lie on those sides, so a line is fitted through the left ends and one through
+the right ends; their intersection is the vertical vanishing point, and the edge nearer to it is
+stretched horizontally so the sides become parallel.
 """
 
 from dataclasses import dataclass, field, asdict
@@ -43,8 +49,15 @@ class RowLine:
 class PerspectiveAnalysis:
     image_shape: Tuple[int, int]                 # (height, width)
     anchor: str
+    # 'vertical': rows converge left / right, fixed by stretching vertically (this module).
+    # 'horizontal': the shelf sides converge top / bottom, fixed by stretching horizontally
+    #   (analyze_shelf_edges). lines are the left / right side, x = slope * y + intercept,
+    #   with box_indices the shelves whose end is on that side; spread_left / spread_right are
+    #   the side-to-side widths at the top / bottom edge.
+    direction: str = 'vertical'
     lines: List[RowLine] = field(default_factory=list)            # rows used for the correction
     rejected_lines: List[RowLine] = field(default_factory=list)   # rows dropped as slope outliers
+    rejected_boxes: List[int] = field(default_factory=list)       # horizontal: trimmed edge shelves
     # slope of a row as a linear function of its height at the image centre:
     # slope = a * y_mid + b (exact for rows converging to one vanishing point)
     slope_model: Optional[Tuple[float, float]] = None
@@ -285,16 +298,139 @@ def analyze_perspective(
     ])
     y_top, y_bot = float(top.y_at(near_x)), float(bottom.y_at(near_x))
     dst = np.float32([[0, y_top], [w, y_top], [w, y_bot], [0, y_bot]])
-    H = cv2.getPerspectiveTransform(src, dst)
+    result.homography, result.output_size = expand_canvas(cv2.getPerspectiveTransform(src, dst), w, h)
+    return result
 
-    # Expand the canvas so nothing stretched off-frame is lost.
+
+def expand_canvas(H, w, h):
+    """Shift H so the warped w x h image starts at (0, 0); returns (H', (out_w, out_h))."""
     corners = cv2.perspectiveTransform(np.float32([[[0, 0]], [[w, 0]], [[w, h]], [[0, h]]]), H)
     xmin, ymin = corners.reshape(-1, 2).min(axis=0)
     xmax, ymax = corners.reshape(-1, 2).max(axis=0)
     T = np.array([[1, 0, -xmin], [0, 1, -ymin], [0, 0, 1]], dtype=float)
-    result.homography = T @ H
-    result.output_size = (int(np.ceil(xmax - xmin)), int(np.ceil(ymax - ymin)))
-    return result
+    return T @ H, (int(np.ceil(xmax - xmin)), int(np.ceil(ymax - ymin)))
+
+
+def _fit_side(points: np.ndarray, indices, tol: float, min_points: int) -> Optional[RowLine]:
+    """
+    Robust line x = slope * y + intercept through shelf end points (x, y): every pair proposes a
+    line, the one with the most points within `tol` px wins, refit by least squares on those.
+    """
+    if len(points) < max(2, min_points):
+        return None
+    x, y = points[:, 0], points[:, 1]
+    best = None
+    for i in range(len(points)):
+        for j in range(i + 1, len(points)):
+            if abs(y[j] - y[i]) < 1e-6:
+                continue
+            slope = (x[j] - x[i]) / (y[j] - y[i])
+            inl = np.abs(x - (x[i] + slope * (y - y[i]))) <= tol
+            if best is None or inl.sum() > best.sum():
+                best = inl
+    if best is None or best.sum() < min_points or np.ptp(y[best]) < 1e-6:
+        return None
+    slope, intercept = np.polyfit(y[best], x[best], 1)
+    resid = x[best] - (slope * y[best] + intercept)
+    return RowLine(float(slope), float(intercept),
+                   [int(k) for k, b in zip(indices, best) if b], float(resid.std()))
+
+
+def analyze_shelf_edges(
+    shelf_boxes,
+    image_shape,
+    edge_margin=0.01,
+    tolerance=0.02,
+    min_points=3,
+    min_stretch_ratio=1.03,
+    max_stretch_ratio=4.0,
+) -> PerspectiveAnalysis:
+    """
+    Horizontal perspective from the ends of the shelf boxes.
+
+    Trimmed edge shelves - boxes cut off by the left or right image border that don't reach the
+    image's centre column, usually a neighbouring unit's shelf peeking in - are removed first:
+    their ends are not on this unit's sides and would skew the fit. Of the remaining shelves,
+    an end cut off by the border is skipped (the shelf's other end still counts).
+
+    A line is fitted through the shelves' left ends and one through their right ends. With both,
+    their intersection is the vertical vanishing point. With only one (the other side's ends
+    run off the image), the vanishing point is taken where that line crosses the image's centre
+    column - true when the camera is only tilted up / down, not rolled, which the vertical pass
+    has already corrected. The homography then maps lines through the vanishing point and the
+    corners of the near edge (the one farther from it) onto the image's left and right edges:
+    the near edge keeps its width, the far edge is stretched to match.
+
+    Args:
+        shelf_boxes: (N, 4) x1, y1, x2, y2 of the shelf detections only
+        image_shape: (height, width)
+        edge_margin: an end within this fraction of the width of the image border is cut off by
+            the frame, not a shelf end
+        tolerance: max distance of an end from its side line, as a fraction of the width
+        min_points: min shelf ends on a side to fit its line
+        min_stretch_ratio: below this near/far width ratio the image is left as is
+        max_stretch_ratio: refuse to correct beyond this
+    """
+    h, w = image_shape
+    res = PerspectiveAnalysis(image_shape=(int(h), int(w)), anchor='shelf-ends',
+                              direction='horizontal')
+    boxes = np.asarray(shelf_boxes, dtype=float).reshape(-1, 4)
+    yc = (boxes[:, 1] + boxes[:, 3]) / 2
+    margin = edge_margin * w
+    cut_left, cut_right = boxes[:, 0] <= margin, boxes[:, 2] >= w - margin
+    trimmed = (cut_left & (boxes[:, 2] < w / 2)) | (cut_right & (boxes[:, 0] > w / 2))
+    res.rejected_boxes = [int(i) for i in np.flatnonzero(trimmed)]
+    left_ok = np.flatnonzero(~trimmed & ~cut_left)
+    right_ok = np.flatnonzero(~trimmed & ~cut_right)
+    tol = tolerance * w
+    left = _fit_side(np.c_[boxes[left_ok, 0], yc[left_ok]], left_ok, tol, min_points)
+    right = _fit_side(np.c_[boxes[right_ok, 2], yc[right_ok]], right_ok, tol, min_points)
+    res.lines = [l for l in (left, right) if l is not None]
+    if not res.lines:
+        res.reason = (f'need >= {min_points} visible shelf ends on a side; found '
+                      f'{len(left_ok)} left, {len(right_ok)} right')
+        return res
+
+    # vanishing point: intersection of x = s1 * y + c1 and x = s2 * y + c2
+    if left is not None and right is not None:
+        if abs(left.slope - right.slope) < 1e-9:
+            res.converges_to, res.stretch_ratio = 'none', 1.0
+            return res
+        vy = (right.intercept - left.intercept) / (left.slope - right.slope)
+        res.spread_left = float(right.y_at(0) - left.y_at(0))
+        res.spread_right = float(right.y_at(h) - left.y_at(h))
+    else:
+        side = left or right
+        if abs(side.slope) < 1e-9:
+            res.converges_to, res.stretch_ratio = 'none', 1.0
+            return res
+        vy = (w / 2 - side.intercept) / side.slope
+    vx = (left or right).y_at(vy)
+    vx, vy = float(vx), float(vy)
+    res.vanishing_point = (vx, vy)
+    if 0 <= vy <= h:
+        res.reason = 'shelf sides cross inside the image; not correcting'
+        return res
+
+    top = vy < 0
+    near_y, far_y = (h, 0) if top else (0, h)
+    ratio = abs(near_y - vy) / abs(far_y - vy)
+    res.stretch_ratio = float(ratio)
+    if ratio < min_stretch_ratio:
+        res.converges_to = 'none'
+        return res
+    res.converges_to = 'top' if top else 'bottom'
+    if ratio > max_stretch_ratio:
+        res.reason = f'stretch ratio {ratio:.2f} exceeds max {max_stretch_ratio}; not correcting'
+        return res
+
+    def x_on(x_near, y):
+        return vx + (x_near - vx) * (y - vy) / (near_y - vy)
+
+    src = np.float32([[x_on(0, 0), 0], [x_on(w, 0), 0], [x_on(w, h), h], [x_on(0, h), h]])
+    dst = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
+    res.homography, res.output_size = expand_canvas(cv2.getPerspectiveTransform(src, dst), w, h)
+    return res
 
 
 def rectify_image(image: np.ndarray, analysis: PerspectiveAnalysis, border_value=(0, 0, 0)):
@@ -328,21 +464,44 @@ def draw_analysis(image: np.ndarray, boxes, analysis: PerspectiveAnalysis) -> np
     for i, (x1, y1, x2, y2) in enumerate(boxes):
         color = palette[row_of[i] % len(palette)] if i in row_of else (160, 160, 160)
         cv2.rectangle(out, (int(x1), int(y1)), (int(x2), int(y2)), color, 1)
-        ax, ay = box_anchor(x1, y1, x2, y2, analysis.anchor)
-        cv2.circle(out, (int(ax), int(ay)), 4, color, -1)
+        if analysis.direction == 'vertical':
+            ax, ay = box_anchor(x1, y1, x2, y2, analysis.anchor)
+            cv2.circle(out, (int(ax), int(ay)), 4, color, -1)
+
+    horizontal = analysis.direction == 'horizontal'
+    for i in analysis.rejected_boxes:  # trimmed edge shelves, left out of the fit: crossed out
+        x1, y1, x2, y2 = boxes[i].astype(int)
+        cv2.rectangle(out, (x1, y1), (x2, y2), (255, 0, 255), max(2, w // 600))
+        cv2.line(out, (x1, y1), (x2, y2), (255, 0, 255), max(2, w // 600))
+        cv2.line(out, (x1, y2), (x2, y1), (255, 0, 255), max(2, w // 600))
+    if horizontal:  # shelf sides: x = slope * y + intercept, through the used shelf ends
+        for line in analysis.lines:
+            for i in line.box_indices:
+                x1, y1, x2, y2 = boxes[i]
+                lx = line.y_at((y1 + y2) / 2)
+                cx = x1 if abs(lx - x1) < abs(lx - x2) else x2
+                cv2.circle(out, (int(cx), int((y1 + y2) / 2)), max(6, w // 200), (0, 220, 0), -1)
+
+    def draw_line(line, color, thickness):
+        if horizontal:
+            p0, p1 = (line.y_at(0), 0), (line.y_at(h), h)
+        else:
+            p0, p1 = (0, line.y_at(0)), (w, line.y_at(w))
+        cv2.line(out, tuple(int(round(v)) for v in p0), tuple(int(round(v)) for v in p1),
+                 color, max(2, w // 600) if horizontal else thickness)
 
     for r, line in enumerate(analysis.lines):
-        color = palette[r % len(palette)]
-        cv2.line(out, (0, int(round(line.y_at(0)))), (w, int(round(line.y_at(w)))), color, 2)
+        draw_line(line, palette[r % len(palette)], 2)
     for line in analysis.rejected_lines:  # slope outliers: thin grey
-        cv2.line(out, (0, int(round(line.y_at(0)))), (w, int(round(line.y_at(w)))),
-                 (128, 128, 128), 1)
+        draw_line(line, (128, 128, 128), 1)
 
-    label = f"converges: {analysis.converges_to}"
+    label = f"{'shelf sides' if horizontal else 'rows'} converge: {analysis.converges_to}"
     if analysis.stretch_ratio:
         label += f"  stretch x{analysis.stretch_ratio:.2f}"
     if analysis.rejected_lines:
         label += f"  rejected {len(analysis.rejected_lines)} row(s)"
+    if analysis.rejected_boxes:
+        label += f"  trimmed shelves {len(analysis.rejected_boxes)}"
     if analysis.reason:
         label += f"  ({analysis.reason})"
     scale = max(0.5, w / 1600)

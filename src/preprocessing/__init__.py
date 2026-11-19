@@ -3,6 +3,7 @@ from .perspective import (
     PerspectiveAnalysis,
     RowLine,
     analyze_perspective,
+    analyze_shelf_edges,
     draw_analysis,
     rectify_image,
     transform_boxes,
@@ -10,5 +11,6 @@ from .perspective import (
 
 __all__ = [
     'ANCHORS', 'PerspectiveAnalysis', 'RowLine',
-    'analyze_perspective', 'draw_analysis', 'rectify_image', 'transform_boxes',
+    'analyze_perspective', 'analyze_shelf_edges', 'draw_analysis', 'rectify_image',
+    'transform_boxes',
 ]
