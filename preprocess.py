@@ -1,7 +1,9 @@
 """
 Image preprocessor.
 
-Runs a chain of preprocessing steps on an image or a folder of images. Steps:
+Runs a chain of preprocessing steps on an image or a folder of images. Videos are stitched into
+wide still images first with stitch.py (as are photo sets); its output folder can be passed here as --source.
+Steps:
   - perspective: detect boxes with the selected model, fit regression lines through the box
     anchors (bottom / center / top) of each row, find the side the rows converge to and stretch
     that side so the rows become parallel. Rows whose slope is an outlier against the other rows
@@ -17,7 +19,10 @@ reaching the image centre) are removed first; then a line through the shelves' l
 through their right ends (ends cut off by the border are skipped) give the shelf unit's sides; if they converge
 towards the top or bottom, that edge is stretched horizontally so the sides become parallel
 (analyze_shelf_edges in src/preprocessing/perspective.py). As in the first pass, a corrected
-image is detected again and cropped, here to the leftmost box's x1 and the rightmost box's x2.
+image is detected again and cropped horizontally, to the shelf unit's sides (vertical after the
+warp, plus --crop-buffer), so neighbouring units are cut away; a side with no fitted line falls
+back to the outermost box. Detections whose centre falls outside the crop are dropped, the rest
+are clipped to it.
 
 Outputs, under --output:
   <name>.<ext>                the preprocessed image (sub-folders of --source preserved)
@@ -43,7 +48,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from src.inference import DetectorPredictor
 from src.models import available_models, build_model
 from src.preprocessing import (ANCHORS, analyze_perspective, analyze_shelf_edges, draw_analysis,
-                               rectify_image, transform_boxes)
+                               rectify_image, side_positions, transform_boxes)
 
 IMAGE_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.webp', '.tif', '.tiff'}
 STEPS = ('perspective', 'crop')
@@ -66,7 +71,11 @@ def _debug_path(args, out_dir, rel, suffix):
 
 
 def perspective_step(image, detections, args, record, direction, debug_path=None):
-    """Analyse one direction and warp the image if the analysis says so. Returns (image, warped)."""
+    """
+    Analyse one direction and warp the image if the analysis says so.
+    Returns (image, warped, sides): sides is {'left'/'right': x in the warped image} for the
+    horizontal pass' fitted shelf sides, used as crop limits.
+    """
     cfg = PASSES[direction]
     boxes = _boxes(detections)
     # Only use the relevant classes; the other boxes are still drawn and transformed, and
@@ -108,15 +117,18 @@ def perspective_step(image, detections, args, record, direction, debug_path=None
     apply = analysis.homography is not None and analysis.converges_to not in (None, 'none')
     rec = record['perspective' + cfg['suffix']] = {**analysis.to_dict(), 'applied': apply}
     if not apply:
-        return image, False
+        return image, False, {}
     rec['rectified_boxes'] = transform_boxes(boxes, analysis.homography).tolist()
-    return rectify_image(image, analysis), True
+    sides = rec['side_x'] = side_positions(analysis)
+    return rectify_image(image, analysis), True, sides
 
 
-def crop_step(image, detections, args, record, direction, debug_path=None):
+def crop_step(image, detections, args, record, direction, debug_path=None, sides=None):
     """
-    Crop to the box extent along the pass' axis, plus --crop-buffer, clamped to the image:
-    vertical -> [topmost y1, bottommost y2], horizontal -> [leftmost x1, rightmost x2].
+    Crop along the pass' axis, plus --crop-buffer, clamped to the image:
+    vertical -> [topmost y1, bottommost y2]; horizontal -> [left side, right side] of the shelf
+    unit (`sides`, x after the warp), a missing side falling back to the leftmost x1 / rightmost x2.
+    Detections whose centre is outside the crop are dropped, the others clipped to it.
     Returns (image, detections in the cropped image's coordinates).
     """
     cfg = PASSES[direction]
@@ -127,11 +139,18 @@ def crop_step(image, detections, args, record, direction, debug_path=None):
     if not detections:
         info['reason'] = 'no detections'
         return image, detections
-    lo = max(0, int(min(d['bbox'][lo_key] for d in detections)) - args.crop_buffer)
-    hi = min(size, int(max(d['bbox'][hi_key] for d in detections) + 0.999) + args.crop_buffer)
+    sides = sides or {}
+    lo_v = sides.get('left', min(d['bbox'][lo_key] for d in detections))
+    hi_v = sides.get('right', max(d['bbox'][hi_key] for d in detections))
+    info['limits_from'] = ['shelf side' if k in sides else 'boxes' for k in ('left', 'right')] \
+        if axis == 0 else ['boxes', 'boxes']
+    lo = max(0, int(lo_v) - args.crop_buffer)
+    hi = min(size, int(hi_v + 0.999) + args.crop_buffer)
     info['y_range' if axis == 1 else 'x_range'] = [lo, hi]
-    shifted = [{**d, 'bbox': {**d['bbox'], lo_key: d['bbox'][lo_key] - lo,
-                              hi_key: d['bbox'][hi_key] - lo}} for d in detections]
+    kept = [d for d in detections if lo <= (d['bbox'][lo_key] + d['bbox'][hi_key]) / 2 < hi]
+    info['dropped'] = len(detections) - len(kept)
+    shifted = [{**d, 'bbox': {**d['bbox'], lo_key: max(0.0, d['bbox'][lo_key] - lo),
+                              hi_key: min(float(hi - lo), d['bbox'][hi_key] - lo)}} for d in kept]
     info['detections'] = shifted
     if debug_path is not None:
         dbg = DetectorPredictor._draw_boxes(image.copy(), {'detections': detections})
@@ -153,8 +172,9 @@ def run_pass(items, direction, predictor, args, out_dir, more_passes):
     sfx = PASSES[direction]['suffix']
     warped = []
     for it in items:
-        it['image'], ok = perspective_step(it['image'], it['detections'], args, it['record'],
-                                           direction, _debug_path(args, out_dir, it['rel'], sfx))
+        it['image'], ok, it['sides'] = perspective_step(
+            it['image'], it['detections'], args, it['record'], direction,
+            _debug_path(args, out_dir, it['rel'], sfx))
         if ok:
             warped.append(it)
         elif 'crop' in args.steps:
@@ -169,7 +189,7 @@ def run_pass(items, direction, predictor, args, out_dir, more_passes):
             if 'crop' in args.steps:
                 it['image'], it['detections'] = crop_step(
                     it['image'], it['detections'], args, it['record'], direction,
-                    _debug_path(args, out_dir, it['rel'], sfx + '_crop'))
+                    _debug_path(args, out_dir, it['rel'], sfx + '_crop'), it['sides'])
     elif warped:
         # nothing will use the detections again, but keep output_detections honest
         for it in warped:
@@ -178,36 +198,40 @@ def run_pass(items, direction, predictor, args, out_dir, more_passes):
 
 def main(args):
     source = Path(args.source)
+    # debug/ sub-folders hold overlays from earlier runs (this script, stitch.py): skip them
     images = ([source] if source.is_file()
-              else sorted(p for p in source.rglob('*') if p.suffix.lower() in IMAGE_EXTENSIONS))
+              else sorted(p for p in source.rglob('*') if p.suffix.lower() in IMAGE_EXTENSIONS
+                          and 'debug' not in p.relative_to(source).parts[:-1]))
     if not images:
         raise SystemExit(f"No images found in {source}")
     root = source.parent if source.is_file() else source
     out_dir = Path(args.output)
 
+    passes = []
+    if 'perspective' in args.steps:
+        passes = ['vertical'] + (['horizontal'] if args.horizontal else [])
     model = build_model(args.model_type, args.model_size, device=args.device)
     model.load_weights(args.weights)
     if args.class_id_map:
         model.load_class_id_map(args.class_id_map)
     predictor = DetectorPredictor(model, conf_threshold=args.conf, iou_threshold=args.iou)
 
-    passes = []
-    if 'perspective' in args.steps:
-        passes = ['vertical'] + (['horizontal'] if args.horizontal else [])
-
     records = []
     for i in tqdm(range(0, len(images), args.batch_size), desc="Preprocessing", unit="batch"):
-        chunk = images[i:i + args.batch_size]
-        preds = predictor.predict_batch([str(p) for p in chunk], verbose=False)
         items = []
-        for path, pred in zip(chunk, preds):
+        for path in images[i:i + args.batch_size]:
             image = cv2.imread(str(path))
             if image is None:
                 print(f"Could not read {path}, skipping")
                 continue
-            record = {'image_path': str(path), 'detections': pred['detections']}
-            items.append({'rel': path.relative_to(root), 'image': image,
-                          'detections': pred['detections'], 'record': record})
+            items.append({'rel': path.relative_to(root), 'image': image, 'detections': None,
+                          'record': {'image_path': str(path)}})
+
+        if items:
+            # in-memory arrays: cv2.imread already applied the EXIF orientation
+            preds = predictor.predict_batch([it['image'] for it in items], verbose=False)
+            for it, pred in zip(items, preds):
+                it['detections'] = it['record']['detections'] = pred['detections']
 
         for k, direction in enumerate(passes):
             run_pass(items, direction, predictor, args, out_dir, more_passes=k < len(passes) - 1)
@@ -239,7 +263,7 @@ def main(args):
 
 
 if __name__ == '__main__':
-    p = argparse.ArgumentParser(description='Preprocess images (perspective rectification, ...)')
+    p = argparse.ArgumentParser(description='Preprocess images (perspective rectification, crop)')
     p.add_argument('--source', required=True, help='Image file or folder (searched recursively)')
     p.add_argument('--output', required=True, help='Output folder')
     p.add_argument('--steps', nargs='+', default=list(STEPS), choices=STEPS,
@@ -297,7 +321,7 @@ if __name__ == '__main__':
 
     c = p.add_argument_group('crop')
     c.add_argument('--crop-buffer', type=int, default=10,
-                   help='Pixels kept beyond the outermost boxes on each cropped side '
-                        '(clamped to the image)')
+                   help='Pixels kept beyond the outermost boxes (or, horizontally, the shelf sides) on each '
+                        'cropped side (clamped to the image)')
 
     main(p.parse_args())

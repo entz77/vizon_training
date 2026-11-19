@@ -58,6 +58,7 @@ class PerspectiveAnalysis:
     lines: List[RowLine] = field(default_factory=list)            # rows used for the correction
     rejected_lines: List[RowLine] = field(default_factory=list)   # rows dropped as slope outliers
     rejected_boxes: List[int] = field(default_factory=list)       # horizontal: trimmed edge shelves
+    sides: List[str] = field(default_factory=list)                # horizontal: 'left'/'right' per line
     # slope of a row as a linear function of its height at the image centre:
     # slope = a * y_mid + b (exact for rows converging to one vanishing point)
     slope_model: Optional[Tuple[float, float]] = None
@@ -386,6 +387,7 @@ def analyze_shelf_edges(
     left = _fit_side(np.c_[boxes[left_ok, 0], yc[left_ok]], left_ok, tol, min_points)
     right = _fit_side(np.c_[boxes[right_ok, 2], yc[right_ok]], right_ok, tol, min_points)
     res.lines = [l for l in (left, right) if l is not None]
+    res.sides = [n for n, l in (('left', left), ('right', right)) if l is not None]
     if not res.lines:
         res.reason = (f'need >= {min_points} visible shelf ends on a side; found '
                       f'{len(left_ok)} left, {len(right_ok)} right')
@@ -431,6 +433,21 @@ def analyze_shelf_edges(
     dst = np.float32([[0, 0], [w, 0], [w, h], [0, h]])
     res.homography, res.output_size = expand_canvas(cv2.getPerspectiveTransform(src, dst), w, h)
     return res
+
+
+def side_positions(analysis):
+    """
+    Horizontal analysis: x of each fitted shelf side after the warp, as {'left': x, 'right': x}.
+    The warp makes the sides vertical, so the x of the line's top and bottom ends are averaged.
+    """
+    if analysis.direction != 'horizontal' or analysis.homography is None:
+        return {}
+    h = analysis.image_shape[0]
+    out = {}
+    for name, line in zip(analysis.sides, analysis.lines):
+        pts = np.float32([[[line.y_at(0), 0]], [[line.y_at(h), h]]])
+        out[name] = float(cv2.perspectiveTransform(pts, analysis.homography)[:, 0, 0].mean())
+    return out
 
 
 def rectify_image(image: np.ndarray, analysis: PerspectiveAnalysis, border_value=(0, 0, 0)):

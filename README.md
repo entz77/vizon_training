@@ -22,7 +22,8 @@ Select one with `model_type` / `model_size` in `configs/training_config.yaml`, o
    - [6. Run Inference](#6-run-inference)
    - [7. Remap Class IDs at Inference Time](#7-remap-class-ids-at-inference-time)
    - [8. Evaluate](#8-evaluate)
-   - [9. Preprocess Images (perspective rectification)](#9-preprocess-images-perspective-rectification)
+   - [9. Stitch Videos or Photos into Wide Images](#9-stitch-videos-or-photos-into-wide-images)
+   - [10. Preprocess Images](#10-preprocess-images-perspective-rectification-crop)
 4. [Notebooks](#notebooks)
 5. [Python API Reference](#python-api-reference)
 6. [Configuration Reference](#configuration-reference)
@@ -52,7 +53,9 @@ vizon_training/
 │   │   ├── evaluator.py               # Metrics (precision/recall/F1, IoU)
 │   │   └── split_metrics.py           # Backend-independent mAP on a dataset split
 │   ├── inference/predictor.py       # Unified image/batch/video/webcam inference
-│   └── preprocessing/perspective.py # Perspective rectification from detected box rows
+│   └── preprocessing/
+│       ├── perspective.py           # Perspective rectification (box rows, shelf sides)
+│       └── stitch.py                # Video / photo stitching
 ├── configs/
 │   ├── training_config.yaml           # Training hyperparameters
 │   ├── dataset_config.yaml            # Dataset paths + class names
@@ -65,7 +68,8 @@ vizon_training/
 ├── train.py                         # Training entry point
 ├── infer.py                         # Inference entry point (image/video/webcam/GCS)
 ├── evaluate.py                      # Evaluation entry point
-├── preprocess.py                    # Image preprocessor (perspective rectification, ...)
+├── stitch.py                        # Video / photos -> wide still image (run before preprocess.py)
+├── preprocess.py                    # Image preprocessor (perspective rectification, crop)
 ├── prepare_dataset.py               # Label Studio (GCS) → versioned GCS dataset
 ├── convert_xywhr_to_xywh.py         # CLI wrapper for rotated → axis-aligned boxes
 ├── convert_class_id_to_zero.py      # CLI wrapper to collapse all classes to id 0
@@ -552,19 +556,127 @@ Needs ADC credentials (`gcloud auth application-default login`) with Secret Mana
 `dev_pg_db` / `prd_pg_db` and read access to the `<env>-vveesee-edge-submit` bucket. RF-DETR runs with
 Hugging Face offline mode forced on, so no Hugging Face calls are made.
 
-### 9. Preprocess Images (perspective rectification)
+### 9. Stitch Videos or Photos into Wide Images
 
-`preprocess.py` runs a chain of preprocessing steps (`--steps`) on an image or a folder of images.
-Currently available:
+`stitch.py` turns a horizontally moving video, or a few photos taken one after another along a
+scene, into one wide still image. Run it **before** `preprocess.py`: its output folder can be
+passed straight to `preprocess.py --source` for perspective correction and cropping. No model is
+needed.
 
-- **`perspective`**: detects boxes with the selected model, fits one regression line per row of
-  boxes through each box's anchor point (`--anchor bottom|center|top`), and compares how far
-  apart the outer lines are at the left and right image edges. The side where they converge
-  (the side farther from the camera) is stretched with a homography so the rows become parallel
-  and horizontal.
+**Inputs** (`--source`, one or more paths):
+
+| Input | Result |
+|-------|--------|
+| Video file | One image per video |
+| Image files | All of them together are one photo set, stitched in the order given (`--name` sets the output name) |
+| Folder (searched recursively) | Every video in it is stitched on its own, and every folder that directly holds two or more images is one photo set, in file-name order (`IMG_2` before `IMG_10`) |
+
+Photos should be taken by stepping sideways along the shelf, facing it the same way each time,
+with each photo overlapping the next by about a third or more. Two photos of the same bay from
+very different angles can't be stitched: deep shelves and protruding products look too different
+from each angle.
+
+**Steps:**
+1. **Keyframes** (videos only): the horizontal motion between frames is tracked. Each time the
+   view has moved `1 - --overlap` of a frame width, the sharpest recent frame (least motion
+   blur) becomes a keyframe. The first and last frames are always included.
+2. **Stitching:** OpenCV's stitching pipeline (SIFT features, bundle adjustment, exposure
+   compensation, graph-cut seams, multi-band blending), with each keyframe or photo matched
+   only to its neighbours in order (`--match-range`). That keeps repeated products or shelf
+   sections from being linked to the wrong place.
+3. **Border crop:** the black border around the stitched area is cut off (`--no-crop` keeps it).
+
+Videos with a rotation tag and photos with an EXIF orientation are turned upright first.
 
 ```bash
-# Single image, YOLO model, lines through box bottoms, with debug overlays
+# A video (camera moving sideways), with the keyframes saved for checking
+python stitch.py \
+    --source path/to/shelf_video.mp4 \
+    --output runs/stitched/ \
+    --debug
+
+# A few photos, left to right, in the order given
+python stitch.py \
+    --source shelf_1.jpg shelf_2.jpg shelf_3.jpg \
+    --output runs/stitched/ \
+    --name aisle_3
+
+# A folder: each video, and each sub-folder of photos, becomes one image
+#   visits/
+#     aisle_1.mp4            -> runs/stitched/aisle_1.jpg
+#     aisle_2/IMG_1..5.jpg   -> runs/stitched/aisle_2.jpg
+python stitch.py \
+    --source visits/ \
+    --output runs/stitched/
+
+# Camera turning on the spot over a wide angle, long 60 fps video
+python stitch.py \
+    --source path/to/video.mp4 \
+    --output runs/stitched/ \
+    --mode panorama \
+    --frame-step 2
+
+# Then rectify and crop the stitched images
+python preprocess.py \
+    --model-type rfdetr --model-size base \
+    --weights models/rfdetr_base.pth \
+    --source runs/stitched/ \
+    --output runs/preprocess/ \
+    --horizontal \
+    --device cuda
+```
+
+Outputs in `--output`:
+
+| Path | Contents |
+|------|----------|
+| `<name>.jpg` | Stitched image: `<video name>.jpg`, `<photo folder name>.jpg` (sub-folders of `--source` are preserved) or `--name` for listed photos |
+| `debug/<name>_inputs.jpg` | With `--debug`: the keyframes / photos side by side, labelled (photos that couldn't be matched are marked `unused`) |
+| `stitch.json` | Per output: inputs, keyframes, the ones used, mode, border crop, output size, and the reason when inputs were left out or stitching failed |
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--name` | `<first image>_stitched` | Output name for image files listed in `--source` |
+| `--mode` | `scans` | `scans`: camera moving sideways (or turning moderately); `panorama`: camera turning on the spot over a wide angle (straight lines curve slightly) |
+| `--match-range` | `2` | Each keyframe / photo is matched with this many before and after it |
+| `--confidence` | `0.4` | Min match confidence for two neighbouring inputs to be joined (pairs further apart need `1.0`, as a weak match there is usually wrong). Lower it (e.g. `0.3`) when inputs with little detail in common (plain walls, glass doors, reflections) are left out; raise it if parts are joined in wrong places |
+| `--no-crop` | off | Keep the black border around the stitched area |
+| `--jpeg-quality` | `95` | JPEG quality of the stitched image |
+| `--overlap` | `0.6` | Videos: overlap between consecutive keyframes (fraction of the frame width) |
+| `--max-frames` | `60` | Videos: at most this many keyframes are stitched (evenly thinned) |
+| `--frame-step` | `1` | Videos: read only every n-th frame (faster on long / high-fps videos) |
+
+If stitching fails with `alignment diverged` or `bundle adjustment failed`, try the other
+`--mode`. When an input is left out, the message names it with its best match confidence: if
+that is just below `--confidence`, lowering it usually works; if it is far below, the inputs
+don't overlap enough.
+
+### 10. Preprocess Images (perspective rectification, crop)
+
+`preprocess.py` runs a chain of preprocessing steps (`--steps`, default both, in this order) on
+an image or a folder of images (searched recursively; `debug/` sub-folders are skipped). For
+videos or photo sets, run [`stitch.py`](#9-stitch-videos-or-photos-into-wide-images) first.
+
+- **`perspective`**: detects boxes with the selected model and fits one regression line per row
+  of boxes through each box's anchor point (`--anchor bottom|center|top`). Rows whose slope is an
+  outlier against the others are dropped. The side the rows converge towards (the side
+  farther from the camera) is stretched with a homography so the rows become parallel and
+  horizontal.
+  - With `--horizontal`, a second pass then makes the shelf unit's sides vertical. It uses only
+    the shelf boxes (`--h-shelf-classes`) and first drops trimmed edge shelves (cut off by the
+    left / right border and not reaching the image centre). It fits a line through the shelves'
+    left ends and one through their right ends, and stretches the top or bottom edge they
+    converge towards.
+- **`crop`**: only for images the perspective step actually warped. The same model runs again on
+  the corrected image, and the image is cropped (plus `--crop-buffer` px):
+  - vertical pass: to the topmost box's top and the bottommost box's bottom, removing the black
+    wedges above and below the shelf;
+  - horizontal pass: to the shelf unit's two sides, which removes neighbouring fridges / bays.
+    A side without a fitted line (e.g. cut off by the photo) falls back to the outermost box.
+    Detections outside the crop are dropped.
+
+```bash
+# Single image, YOLO model, vertical correction + crop, with debug overlays
 python preprocess.py \
     --weights runs/detect/train/weights/best.pt \
     --source path/to/image.jpg \
@@ -572,16 +684,16 @@ python preprocess.py \
     --anchor bottom \
     --debug
 
-# Whole folder (recursive) with an RF-DETR model on GPU, lines through box centers
+# RF-DETR on GPU, vertical and horizontal correction (shelf sides), shelves excluded from the row fit
 python preprocess.py \
     --model-type rfdetr --model-size base \
     --weights models/rfdetr_base.pth \
     --source path/to/image_folder/ \
     --output runs/preprocess/ \
-    --anchor center \
-    --conf 0.4 \
+    --anchor bottom \
+    --exclude-classes Shelf \
+    --horizontal \
     --device cuda \
-    --batch-size 16 \
     --debug
 ```
 
@@ -590,26 +702,48 @@ Outputs in `--output`:
 | Path | Contents |
 |------|----------|
 | `<name>.<ext>` | Preprocessed image (sub-folders of `--source` are preserved) |
-| `debug/<name>.<ext>` | With `--debug`: boxes, anchors, one colored regression line per row and the verdict, drawn on the original |
-| `preprocess.json` | Per image: detections, and under `perspective` the convergence side, stretch ratio, vanishing point, homography, whether it was applied, and the boxes mapped into the rectified image |
+| `debug/<name>.<ext>` | With `--debug`: boxes, row lines (rejected rows thin grey) and the verdict, drawn on the input |
+| `debug/<name>_crop.<ext>` | With `--debug`: detections on the corrected image and the crop limits |
+| `debug/<name>_h.<ext>`, `debug/<name>_h_crop.<ext>` | Same for the horizontal pass (`--horizontal`); trimmed edge shelves are crossed out |
+| `preprocess.json` | Per image: detections; `perspective` / `perspective_h` (convergence side, stretch ratio, vanishing point, homography, whether it was applied, rectified boxes, shelf-side positions); `crop` / `crop_h` (range, dropped boxes, detections after the crop); `output_detections` in output-image coordinates |
 
-The CLI also prints a summary such as `Perspective: left: 12, not corrected: 5, right: 31`
-(images whose rows are already parallel count as `not corrected`).
+The CLI prints a summary such as
+`Perspective (vertical): left: 12, not corrected: 5, right: 31 | cropped 43/48`.
 
-Perspective flags:
+Perspective flags (vertical pass):
 
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `--anchor` | `bottom` | Box point the row lines go through: `bottom`, `center` or `top` |
 | `--min-boxes-per-row` | `3` | Rows with fewer boxes are ignored |
 | `--row-tolerance` | `0.5` | How far (in median box heights) a box may be from a row's line and still join it |
-| `--min-stretch-ratio` | `1.03` | Near/far spread ratio below which the image is left as is (`converges_to: none`) |
+| `--min-stretch-ratio` | `1.03` | Near/far ratio below which the image is left as is (`converges_to: none`) |
 | `--max-stretch-ratio` | `3.0` | Ratio above which the fit is distrusted and the image is left as is |
+| `--max-row-slope` | `0.5` | Rows steeper than this \|dy/dx\| are dropped as mis-grouped |
+| `--slope-tolerance` | `0.03` | Rows whose slope deviates more than this from the other rows' trend are dropped as outliers |
+| `--exclude-classes` | none | Class names left out of the row fit (e.g. `Shelf`) |
+
+Horizontal pass flags:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--horizontal` | off | Also run the horizontal pass (after the vertical one) |
+| `--h-shelf-classes` | `Shelf` | Class names whose boxes are shelves |
+| `--h-edge-margin` | `0.01` | Shelf ends within this fraction of the width from the border count as cut off |
+| `--h-tolerance` | `0.02` | Max distance of a shelf end from its side line (fraction of the width) |
+| `--h-min-points` | `3` | Min shelf ends needed to fit a side |
+| `--h-max-stretch-ratio` | `4.0` | Ratio above which the fit is distrusted and the image is left as is |
+
+Crop flag:
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--crop-buffer` | `10` | Pixels kept beyond the crop limits on each side |
 
 Model flags (`--model-type`, `--model-size`, `--weights`, `--class-id-map`, `--conf`, `--iou`,
-`--device`, `--batch-size`) work as in `infer.py`. An image is not corrected when fewer than two
-rows qualify, the stretch ratio is outside the min/max range, or the outer rows are too close
-together; the reason is recorded in `preprocess.json`.
+`--device`, `--batch-size`) work as in `infer.py`. An image is not corrected when too few rows (or shelf ends) qualify,
+the stretch ratio is outside the min/max range, or the outer lines are too close together; the
+reason is recorded in `preprocess.json`, and such images are not cropped.
 
 ## Notebooks
 
